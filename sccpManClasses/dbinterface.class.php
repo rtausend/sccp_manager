@@ -13,6 +13,8 @@ class dbinterface
 {
 
     private $val_null = 'NONE'; /// REPLACE to null Field
+    private $paren_class = null;
+    private $db = null;
 
     public function __construct($parent_class = null)
     {
@@ -74,7 +76,7 @@ class dbinterface
                         break;
                     case "sccp":      // Fall through to default intentionally
                     default:
-                        $stmts = $this->db->prepare("SELECT name, type, button, addon, description, 'not connected' AS status, '- -' AS address, 'N' AS new_hw
+                        $stmts = $this->db->prepare("SELECT name, type, button, addon, description, imageversion, 'not connected' AS status, '- -' AS address, 'N' AS new_hw
                             FROM sccpdeviceconfig WHERE type not LIKE '%-sip' ORDER BY name");
                         break;
                 }
@@ -134,10 +136,15 @@ class dbinterface
                 break;
             case 'getAssignedExtensions':
                 // all extensions that are designed as default lines
-                $stmtU = $this->db->prepare("SELECT DISTINCT name, name FROM sccpbuttonconfig WHERE buttontype = 'line' AND instance =1");
+                $stmtU = $this->db->prepare("SELECT DISTINCT
+                    TRIM(TRAILING '!silent' FROM SUBSTRING_INDEX(name, '@', 1)) AS name,
+                    TRIM(TRAILING '!silent' FROM SUBSTRING_INDEX(name, '@', 1)) AS line_name
+                    FROM sccpbuttonconfig WHERE buttontype = 'line' AND instance =1");
                 break;
             case 'getDefaultLine':
-                $stmt = $this->db->prepare("SELECT name FROM sccpbuttonconfig WHERE ref = '{$data['id']}' and instance =1 and buttontype = 'line'");
+                $stmt = $this->db->prepare("SELECT TRIM(TRAILING '!silent' FROM SUBSTRING_INDEX(name, '@', 1)) AS name
+                    FROM sccpbuttonconfig WHERE ref = :ref and instance =1 and buttontype = 'line'");
+                $stmt->bindParam(':ref', $data['id'],\PDO::PARAM_STR);
                 break;
             case 'get_sccpdevice_buttons':
                 $sql = '';
@@ -362,7 +369,8 @@ class dbinterface
         switch ($dataid) {
             case "DeviceById":
                 // TODO: This needs to be rewritten
-                $stmt = $this->db->prepare("SELECT keyword,data FROM sip WHERE id = '${line}'");
+                $stmt = $this->db->prepare("SELECT keyword,data FROM sip WHERE id = :line");
+                $stmt->bindParam(':line', $line, \PDO::PARAM_STR);
                 $stmt->execute();
                 $tech = $stmt->fetchAll(\PDO::FETCH_COLUMN | \PDO::FETCH_GROUP);
                 foreach ($tech as &$value) {
@@ -398,6 +406,11 @@ class dbinterface
     }
 
     public function updateTableDefaults($table, $field, $value) {
+        $stmt = $this->db->prepare("SHOW COLUMNS FROM {$table} LIKE ?");
+        $stmt->execute([$field]);
+        if ($stmt->rowCount() === 0) {
+            return;
+        }
         $stmt = $this->db->prepare("ALTER TABLE {$table} ALTER COLUMN {$field} SET DEFAULT '{$value}'");
         $stmt->execute();
     }
@@ -434,17 +447,39 @@ class dbinterface
     }
 
     public function getNamedGroup($callGroup) {
-        $sql = "SELECT {$callGroup} FROM sccpline GROUP BY {$callGroup}";
-        $sth = $this->db->prepare($sql);
         $result = array();
         $tech = array();
+        
+        // Determine grouptype based on field name
+        $groupTypes = array();
+        if ($callGroup == 'namedcallgroup') {
+            $groupTypes = array('callgroup', 'both');
+        } elseif ($callGroup == 'namedpickupgroup') {
+            $groupTypes = array('pickupgroup', 'both');
+        } else {
+            return $tech;
+        }
+        
+        // Query from sccpnamedgroups instead of sccpline
+        $placeholders = implode(',', array_fill(0, count($groupTypes), '?'));
+        $sql = "SELECT groupname FROM sccpnamedgroups WHERE grouptype IN ({$placeholders}) ORDER BY groupname ASC";
+        
         try {
-            $sth->execute();
+            $sth = $this->db->prepare($sql);
+            $sth->execute($groupTypes);
             $result = $sth->fetchAll();
-            foreach($result as $val) {
-               $tech[$callGroup][] = $val[0];
+            
+            // Initialize with placeholder value so field is not hidden/disabled
+            $tech[$callGroup] = array('__placeholder__');
+            
+            // Add all named groups (empty option added in view rendering)
+            foreach($result as $row) {
+                $tech[$callGroup][] = $row['groupname'];
             }
-        } catch(\Exception $e) {}
-    return $tech;
+        } catch(\Exception $e) {
+            error_log("ERROR getNamedGroup: " . $e->getMessage());
+        }
+        
+        return $tech;
     }
 }

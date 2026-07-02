@@ -44,6 +44,9 @@ $(document).ready(function () {
         if ($('.fpbx-submit').data('id') == "dial_template") {
             snd_command = 'save_dialplan_template';
         }
+        if ($('.fpbx-submit').data('id') == "sccp_line_edit") {
+            snd_command = 'save_sccp_line';
+        }
 
         $.ajax({
             type: 'POST',
@@ -80,6 +83,9 @@ $(document).ready(function () {
         }
         if ($('.fpbx-submit').data('id') == "dial_template") {
             snd_command = 'save_dialplan_template';
+        }
+        if ($('.fpbx-submit').data('id') == "sccp_line_edit") {
+            snd_command = 'save_sccp_line';
         }
         $.ajax({
             type: 'POST',
@@ -267,6 +273,9 @@ $(document).ready(function () {
                         }
                     }
                     break;
+                    case 'service':
+                        class_id = ['service'];
+                        break;
                 case 'speeddial':
                     class_id = ['speeddial','hintline'];
                     break;
@@ -324,6 +333,16 @@ $(document).ready(function () {
         }
         var totButtons = parseInt(btn_dev, 10) + parseInt(btn_add, 10);
         $('#buttonscount').attr('value', totButtons);
+        if ($('#devButtonCnt').length) {
+            $('#devButtonCnt').val(btn_dev);
+        }
+        if ($('#addonCnt').length && type_id != null) {
+            $('#addonCnt').val(type_id);
+        }
+        var modelType = $('#sccp_hw_type').val();
+        if (modelType) {
+            loadFirmwareCatalog(modelType);
+        }
         $('.line_button').each(function () {
             if ($(this).data('id') < totButtons) {
                 $(this).removeClass('hidden');
@@ -335,6 +354,54 @@ $(document).ready(function () {
         });
     });
 
+    function loadFirmwareCatalog(model, selectedValue) {
+        if (!model || !$('#sccp_hw_imageversion').length) {
+            return;
+        }
+        $.ajax({
+            type: 'GET',
+            url: 'ajax.php?module=sccp_manager&command=get_firmware_catalog',
+            data: { model: model },
+            success: function (data) {
+                if (!data.status || !data.catalog) {
+                    return;
+                }
+                var $sel = $('#sccp_hw_imageversion');
+                var current = selectedValue || $sel.val();
+                $sel.empty();
+                var defaultLabel = _('Model default');
+                if (data.catalog.model_default) {
+                    defaultLabel += ' (' + data.catalog.model_default + ')';
+                }
+                $sel.append($('<option>', { value: 'NONE', text: defaultLabel }));
+                (data.catalog.files || []).forEach(function (file) {
+                    $sel.append($('<option>', { value: file, text: file }));
+                });
+                if (current && current !== 'NONE') {
+                    if ($sel.find('option[value="' + current.replace(/"/g, '\\"') + '"]').length) {
+                        $sel.val(current);
+                    } else {
+                        $sel.append($('<option>', { value: current, text: current + ' *' }));
+                        $sel.val(current);
+                    }
+                } else {
+                    $sel.val('NONE');
+                }
+            }
+        });
+    }
+
+    if ($('#sccp_hw_imageversion').length) {
+        var initialModel = $('#sccp_hw_type').val();
+        var initialFirmware = $('#sccp_hw_imageversion').val();
+        if (initialModel) {
+            loadFirmwareCatalog(initialModel, initialFirmware);
+        }
+    }
+    if ($('#sccp_hw_type').is('select')) {
+        $('#sccp_hw_type').trigger('change');
+    }
+
     $('.lineSelect').change(function (e) {
         var line_id = $('#sccp_hw_defaultLine option:selected').val();
         $("select.lineid_0 option:selected").prop("selected",false);
@@ -345,6 +412,15 @@ $(document).ready(function () {
         var line_id = $('#button0_line option:selected').val();
         $("#sccp_hw_defaultLine option:selected").prop("selected",false);
         $("#sccp_hw_defaultLine option[value=" + line_id + "]").prop("selected",true);
+    });
+
+    $('select[name$="_hline"]').change(function () {
+        var name = $(this).attr('name');
+        var match = name.match(/^button(\d+)_hline$/);
+        if (match) {
+            var hintCheckboxId = '#button' + match[1] + '_hint';
+            $(hintCheckboxId).prop('checked', $(this).val() !== '');
+        }
     });
 
     $('.sccp_button_hide').each(function () {
@@ -1300,3 +1376,471 @@ $(".sccp-edit").click(function() {
         }
   	}
 });
+
+// SEP exchange / replace wizard
+(function () {
+    var swapStepIndex = 0;
+    var swapStepIds = ['#swap-step-mode', '#swap-step-devices', '#swap-step-preview'];
+
+    function getSccpPhoneRows() {
+        if (!$('#table-sccp').length) {
+            return [];
+        }
+        return $('#table-sccp').bootstrapTable('getData') || [];
+    }
+
+    function isManagedSccpRow(row) {
+        return row && row.name && row.new_hw !== 'Y' && (row.type || '').indexOf('sip') === -1;
+    }
+
+    function isNewSccpRow(row) {
+        return row && row.name && row.new_hw === 'Y' && (row.type || '').indexOf('sip') === -1;
+    }
+
+    function populateSwapDeviceLists() {
+        var rows = getSccpPhoneRows();
+        var existing = rows.filter(isManagedSccpRow);
+        var discovered = rows.filter(isNewSccpRow);
+        var sourceVal = $('#swap-source').val();
+        var targetVal = $('#swap-target-existing').val();
+        var newVal = $('#swap-target-new').val();
+
+        $('#swap-source, #swap-target-existing').empty();
+        $('#swap-target-new').empty().append(
+            $('<option>', { value: '', text: _('— Select discovered device or enter MAC below —') })
+        );
+
+        existing.forEach(function (row) {
+            var label = row.name + ' — ' + (row.description || row.type || '');
+            $('#swap-source').append($('<option>', { value: row.name, text: label }));
+            $('#swap-target-existing').append($('<option>', { value: row.name, text: label }));
+        });
+        discovered.forEach(function (row) {
+            var label = row.name + ' — *NEW* ' + (row.description || row.type || '');
+            $('#swap-target-new').append($('<option>', { value: row.name, text: label }));
+        });
+
+        if (sourceVal) {
+            $('#swap-source').val(sourceVal);
+        }
+        if (targetVal) {
+            $('#swap-target-existing').val(targetVal);
+        }
+        if (newVal) {
+            $('#swap-target-new').val(newVal);
+        }
+    }
+
+    function getSwapMode() {
+        return $('input[name="swap_mode"]:checked').val();
+    }
+
+    function updateSwapModeUi() {
+        var mode = getSwapMode();
+        if (mode === 'swap') {
+            $('#swap-target-existing-group').show();
+            $('#swap-target-replace-group').hide();
+        } else {
+            $('#swap-target-existing-group').hide();
+            $('#swap-target-replace-group').show();
+        }
+    }
+
+    function getSwapTargetValue() {
+        var mode = getSwapMode();
+        if (mode === 'swap') {
+            return $('#swap-target-existing').val();
+        }
+        var discovered = $('#swap-target-new').val();
+        if (discovered) {
+            return discovered;
+        }
+        return $('#swap-target-mac').val();
+    }
+
+    function getSwapRequestData() {
+        return {
+            mode: getSwapMode(),
+            source: $('#swap-source').val(),
+            target: getSwapTargetValue(),
+            old_action: $('input[name="swap_old_action"]:checked').val() || 'keep'
+        };
+    }
+
+    function showSwapStep(index) {
+        swapStepIndex = index;
+        $('#swap-sep-steps li').removeClass('active').eq(index).addClass('active');
+        $(swapStepIds.join(',')).removeClass('active');
+        $(swapStepIds[index]).addClass('active');
+        $('#swap-prev-step').toggle(index > 0);
+        $('#swap-next-step').toggle(index < swapStepIds.length - 1);
+        $('#swap-execute').toggle(index === swapStepIds.length - 1);
+    }
+
+    function resetSwapWizard() {
+        swapStepIndex = 0;
+        $('input[name="swap_mode"][value="swap"]').prop('checked', true);
+        $('input[name="swap_old_action"][value="keep"]').prop('checked', true);
+        $('#swap-target-mac').val('');
+        $('#swap-confirm-understand').prop('checked', false);
+        $('#swap-preview-summary').empty();
+        $('#swap-preview-warnings').hide().empty();
+        $('#swap-execute').prop('disabled', true);
+        updateSwapModeUi();
+        populateSwapDeviceLists();
+        showSwapStep(0);
+
+        var selections = $('#table-sccp').bootstrapTable('getSelections') || [];
+        if (selections.length === 1) {
+            $('#swap-source').val(selections[0].name);
+        } else if (selections.length === 2) {
+            $('input[name="swap_mode"][value="swap"]').prop('checked', true);
+            updateSwapModeUi();
+            $('#swap-source').val(selections[0].name);
+            $('#swap-target-existing').val(selections[1].name);
+        }
+    }
+
+    function renderSwapPreview(data) {
+        var html = '';
+        if (data.summary && data.summary.source) {
+            html += '<p><strong>' + _('Source') + ':</strong> ' + data.summary.source.name;
+            if (data.summary.source.description) {
+                html += ' — ' + data.summary.source.description;
+            }
+            html += ' (' + (data.summary.source.type || '') + ', ' + data.summary.source.button_count + ' ' + _('buttons') + ')</p>';
+            if (data.summary.source.lines && data.summary.source.lines.length) {
+                html += '<p><strong>' + _('Lines') + ':</strong> ' + data.summary.source.lines.join(', ') + '</p>';
+            }
+        }
+        if (data.summary && data.summary.target && data.summary.target.name) {
+            html += '<p><strong>' + _('Target') + ':</strong> ' + data.summary.target.name;
+            if (data.summary.target.description) {
+                html += ' — ' + data.summary.target.description;
+            }
+            if (data.summary.target.type) {
+                html += ' (' + data.summary.target.type + ', ' + data.summary.target.button_count + ' ' + _('buttons') + ')';
+            }
+            html += '</p>';
+            if (data.summary.target.lines && data.summary.target.lines.length) {
+                html += '<p><strong>' + _('Lines') + ':</strong> ' + data.summary.target.lines.join(', ') + '</p>';
+            }
+        }
+        if (data.mode === 'replace') {
+            html += '<p><strong>' + _('Operation') + ':</strong> ' + _('Copy configuration to target');
+            html += ' — ' + (data.old_action === 'delete' ? _('delete old device') : _('keep old device unchanged')) + '</p>';
+        } else {
+            html += '<p><strong>' + _('Operation') + ':</strong> ' + _('Swap configurations between both devices') + '</p>';
+        }
+        $('#swap-preview-summary').html(html);
+
+        if (data.warnings && data.warnings.length) {
+            $('#swap-preview-warnings').show().html('<ul><li>' + data.warnings.join('</li><li>') + '</li></ul>');
+        } else {
+            $('#swap-preview-warnings').hide().empty();
+        }
+    }
+
+    function validateSwapDevicesStep() {
+        var data = getSwapRequestData();
+        if (!data.source) {
+            fpbxToast(_('Please select a source device.'), '', 'warning');
+            return false;
+        }
+        if (!data.target) {
+            fpbxToast(_('Please select or enter a target device.'), '', 'warning');
+            return false;
+        }
+        if (data.source === data.target) {
+            fpbxToast(_('Source and target must be different.'), '', 'warning');
+            return false;
+        }
+        return true;
+    }
+
+    $('#modal-swap-sep').on('show.bs.modal', function () {
+        resetSwapWizard();
+    });
+
+    $('input[name="swap_mode"]').on('change', updateSwapModeUi);
+
+    $('#swap-confirm-understand').on('change', function () {
+        $('#swap-execute').prop('disabled', !$(this).is(':checked'));
+    });
+
+    $('#swap-next-step').on('click', function () {
+        if (swapStepIndex === 0) {
+            updateSwapModeUi();
+            populateSwapDeviceLists();
+            showSwapStep(1);
+            return;
+        }
+        if (swapStepIndex === 1) {
+            if (!validateSwapDevicesStep()) {
+                return;
+            }
+            $.ajax({
+                type: 'POST',
+                url: 'ajax.php?module=sccp_manager&command=preview_swap_device',
+                data: getSwapRequestData(),
+                success: function (data) {
+                    if (data.status === true) {
+                        renderSwapPreview(data);
+                        showSwapStep(2);
+                    } else {
+                        bs_alert(data.message || _('Preview failed'), data.status);
+                    }
+                }
+            });
+        }
+    });
+
+    $('#swap-prev-step').on('click', function () {
+        if (swapStepIndex > 0) {
+            showSwapStep(swapStepIndex - 1);
+        }
+    });
+
+    $('#swap-execute').on('click', function () {
+        if (!$('#swap-confirm-understand').is(':checked')) {
+            fpbxToast(_('Please confirm that you understand the impact.'), '', 'warning');
+            return;
+        }
+        var requestData = getSwapRequestData();
+        $('#swap-execute').prop('disabled', true);
+        $.ajax({
+            type: 'POST',
+            url: 'ajax.php?module=sccp_manager&command=swap_device',
+            data: requestData,
+            success: function (data) {
+                if (data.status === true) {
+                    $('#modal-swap-sep').modal('hide');
+                    if (data.table_reload === true) {
+                        $('#table-sccp').bootstrapTable('refresh');
+                    }
+                    fpbxToast(data.message, _('Operation Result'), 'success');
+                } else {
+                    bs_alert(data.message || _('Exchange failed'), data.status);
+                    $('#swap-execute').prop('disabled', false);
+                }
+            },
+            error: function () {
+                bs_alert(_('Exchange failed'), false);
+                $('#swap-execute').prop('disabled', false);
+            }
+        });
+    });
+
+    $('#table-sccp').on('post-body.bs.table', function () {
+        if ($('#modal-swap-sep').hasClass('in') || $('#modal-swap-sep').is(':visible')) {
+            populateSwapDeviceLists();
+        }
+    });
+})();
+
+// Firmware assignment wizard
+(function () {
+    var fwStepIndex = 0;
+    var fwStepIds = ['#fw-step-devices', '#fw-step-firmware', '#fw-step-preview'];
+    var fwSelectedRows = [];
+
+    function getManagedFirmwareRows() {
+        return ($('#table-sccp').bootstrapTable('getSelections') || []).filter(function (row) {
+            return row && row.name && row.new_hw !== 'Y' && (row.type || '').indexOf('sip') === -1;
+        });
+    }
+
+    function groupRowsByType(rows) {
+        var groups = {};
+        rows.forEach(function (row) {
+            if (!groups[row.type]) {
+                groups[row.type] = [];
+            }
+            groups[row.type].push(row);
+        });
+        return groups;
+    }
+
+    function renderFirmwareDeviceList() {
+        var html = '<ul>';
+        fwSelectedRows.forEach(function (row) {
+            html += '<li><strong>' + row.name + '</strong> — ' + (row.description || '') + ' (' + row.type + ')</li>';
+        });
+        html += '</ul>';
+        $('#fw-device-list').html(html);
+    }
+
+    function populateFirmwareModelSelectors() {
+        var groups = groupRowsByType(fwSelectedRows);
+        var $container = $('#fw-model-selectors');
+        $container.empty();
+        Object.keys(groups).sort().forEach(function (model) {
+            var groupId = 'fw-model-' + model.replace(/[^a-zA-Z0-9]/g, '_');
+            $container.append(
+                '<div class="form-group" data-model="' + model + '">' +
+                '<label for="' + groupId + '">' + _('Model') + ' ' + model + ' (' + groups[model].length + ')</label>' +
+                '<select class="form-control fw-model-select" id="' + groupId + '" data-model="' + model + '">' +
+                '<option value="">' + _('Loading...') + '</option>' +
+                '</select></div>'
+            );
+            $.ajax({
+                type: 'GET',
+                url: 'ajax.php?module=sccp_manager&command=get_firmware_catalog',
+                data: { model: model },
+                success: function (data) {
+                    var $sel = $('#' + groupId);
+                    $sel.empty();
+                    var defaultLabel = _('Model default');
+                    if (data.catalog && data.catalog.model_default) {
+                        defaultLabel += ' (' + data.catalog.model_default + ')';
+                    }
+                    $sel.append($('<option>', { value: 'NONE', text: defaultLabel }));
+                    if (data.catalog && data.catalog.files) {
+                        data.catalog.files.forEach(function (file) {
+                            $sel.append($('<option>', { value: file, text: file }));
+                        });
+                    }
+                    $sel.val('NONE');
+                }
+            });
+        });
+    }
+
+    function getFirmwareMap() {
+        var map = {};
+        $('.fw-model-select').each(function () {
+            map[$(this).data('model')] = $(this).val();
+        });
+        return map;
+    }
+
+    function getFirmwareRequestData() {
+        var triggerReset = $('#fw-trigger-reset').is(':checked') ? '1' : '0';
+        var data = 'firmware_map=' + encodeURIComponent(JSON.stringify(getFirmwareMap())) + '&';
+        data += 'trigger_restart=' + triggerReset + '&';
+        fwSelectedRows.forEach(function (row, index) {
+            data += 'idn[' + index + ']=' + encodeURIComponent(row.name) + '&';
+        });
+        return data;
+    }
+
+    function updateFirmwareExecuteLabel() {
+        if ($('#fw-trigger-reset').is(':checked')) {
+            $('#fw-execute').text(_('Assign and reset'));
+        } else {
+            $('#fw-execute').text(_('Assign only (XML)'));
+        }
+    }
+
+    function showFirmwareStep(index) {
+        fwStepIndex = index;
+        $('#firmware-steps li').removeClass('active').eq(index).addClass('active');
+        $(fwStepIds.join(',')).removeClass('active');
+        $(fwStepIds[index]).addClass('active');
+        $('#fw-prev-step').toggle(index > 0);
+        $('#fw-next-step').toggle(index < fwStepIds.length - 1);
+        $('#fw-execute').toggle(index === fwStepIds.length - 1);
+    }
+
+    function resetFirmwareWizard() {
+        fwStepIndex = 0;
+        fwSelectedRows = getManagedFirmwareRows();
+        $('#fw-preview-table tbody').empty();
+        $('#fw-preview-warnings').hide().empty();
+        $('#fw-trigger-reset').prop('checked', true);
+        updateFirmwareExecuteLabel();
+        renderFirmwareDeviceList();
+        populateFirmwareModelSelectors();
+        showFirmwareStep(0);
+    }
+
+    function renderFirmwarePreview(data) {
+        var $tbody = $('#fw-preview-table tbody');
+        $tbody.empty();
+        (data.rows || []).forEach(function (row) {
+            $tbody.append(
+                '<tr>' +
+                '<td>' + row.name + '</td>' +
+                '<td>' + row.type + '</td>' +
+                '<td>' + (row.current_assigned || '-') + '</td>' +
+                '<td>' + (row.new_assigned || '-') + '</td>' +
+                '<td>' + (row.valid ? '<span class="text-success">' + _('Yes') + '</span>' : '<span class="text-danger">' + _('No') + '</span>') + '</td>' +
+                '</tr>'
+            );
+        });
+        if (data.warnings && data.warnings.length) {
+            $('#fw-preview-warnings').show().html('<ul><li>' + data.warnings.join('</li><li>') + '</li></ul>');
+        } else {
+            $('#fw-preview-warnings').hide().empty();
+        }
+    }
+
+    $('#modal-assign-firmware').on('show.bs.modal', function () {
+        resetFirmwareWizard();
+        if (!fwSelectedRows.length) {
+            fpbxToast(_('Please select at least one SCCP device.'), '', 'warning');
+            $('#modal-assign-firmware').modal('hide');
+        }
+    });
+
+    $('#fw-next-step').on('click', function () {
+        if (fwStepIndex === 0) {
+            if (!fwSelectedRows.length) {
+                fpbxToast(_('Please select at least one SCCP device.'), '', 'warning');
+                return;
+            }
+            showFirmwareStep(1);
+            return;
+        }
+        if (fwStepIndex === 1) {
+            $.ajax({
+                type: 'POST',
+                url: 'ajax.php?module=sccp_manager&command=preview_firmware_assign',
+                data: getFirmwareRequestData(),
+                success: function (data) {
+                    if (data.status === true) {
+                        renderFirmwarePreview(data);
+                        updateFirmwareExecuteLabel();
+                        showFirmwareStep(2);
+                    } else {
+                        var message = (data.errors || []).join(' ') || data.message || _('Preview failed');
+                        bs_alert(message, data.status);
+                    }
+                }
+            });
+        }
+    });
+
+    $('#fw-prev-step').on('click', function () {
+        if (fwStepIndex > 0) {
+            showFirmwareStep(fwStepIndex - 1);
+        }
+    });
+
+    $('#fw-trigger-reset').on('change', updateFirmwareExecuteLabel);
+
+    $('#fw-execute').on('click', function () {
+        $('#fw-execute').prop('disabled', true);
+        $.ajax({
+            type: 'POST',
+            url: 'ajax.php?module=sccp_manager&command=assign_firmware',
+            data: getFirmwareRequestData(),
+            success: function (data) {
+                $('#fw-execute').prop('disabled', false);
+                if (data.status === true) {
+                    $('#modal-assign-firmware').modal('hide');
+                    if (data.table_reload === true) {
+                        $('#table-sccp').bootstrapTable('refresh');
+                    }
+                    fpbxToast(data.message, _('Firmware assignment'), 'success');
+                } else {
+                    bs_alert(data.message || _('Firmware assignment failed'), data.status);
+                }
+            },
+            error: function () {
+                $('#fw-execute').prop('disabled', false);
+                bs_alert(_('Firmware assignment failed'), false);
+            }
+        });
+    });
+})();

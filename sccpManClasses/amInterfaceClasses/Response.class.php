@@ -16,6 +16,9 @@ abstract class Response extends IncomingMessage
     protected $_events;
     protected $_completed;
     protected $keys;
+    protected $eventListIsCompleted = false;
+    protected $eventListEndEvent = '';
+    protected $_tables = array();
 
     public function __construct($rawContent)
     {
@@ -164,9 +167,15 @@ class SCCPJSON_Response extends Generic_Response
     }
     public function getResult()
     {
-        if (($json = json_decode($this->getKey('JSON'), true)) != false) {
+        $jsonRaw = $this->getKey('JSONRAW');
+        if ($jsonRaw === null || $jsonRaw === '') {
+            return array();
+        }
+        $json = json_decode((string) $jsonRaw, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
             return $json;
         }
+        return array();
     }
 }
 
@@ -192,12 +201,13 @@ class SCCPGeneric_Response extends Response
         // Start of list is handled by the isList function in the Constructor
         // which also defines the list end event
 
-        if ( empty($thisSetEventEntryType)) {
+        if (empty($thisSetEventEntryType)) {
             // This is empty as soon as we have received a TableStart.
             // The next message is the first of the data sets
             // We use this variable in the switch to add set entries
-            if (strpos($event->getName(), 'Entry')) {
-                $thisSetEventEntryType = $event->getName();
+            $eventName = $event->getName();
+            if (is_string($eventName) && strpos($eventName, 'Entry') !== false) {
+                $thisSetEventEntryType = $eventName;
             } else {
                 $thisSetEventEntryType = 'undefinedAsThisIsNotASet';
             }
@@ -377,7 +387,10 @@ class SCCPShowDevice_Response extends SCCPGeneric_Response
         $result = array();
 
         foreach ($this->_events as $trow) {
-                $result = array_merge($result, $trow->getKeys());
+            $keys = $trow->getKeys();
+            if (is_array($keys)) {
+                $result = array_merge($result, $keys);
+            }
         }
         // Now handle label changes so that keys from AMI correspond to db keys in _tables
         $result['Buttons'] = $this->ConvertTableData(
@@ -400,15 +413,35 @@ class SCCPShowDevice_Response extends SCCPGeneric_Response
                   'maxqual'=>'maxqual', 'rconceal'=>'rconceal', 'sconceal'=>'sconceal'
                   )
         );
-        $result['SCCP_Vendor'] = array('vendor' => strtok($result['skinnyphonetype'], ' '), 'model' => strtok('('),
-                                       'model_id' => strtok(')'), 'vendor_addon' => strtok($result['configphonetype'], ' '),
-                                       'model_addon' => strtok(' '));
-        if (empty($result['SCCP_Vendor']['vendor']) || $result['SCCP_Vendor']['vendor'] == 'Undefined') {
-            $result['SCCP_Vendor'] = array('vendor' => 'Undefined', 'model' => $result['configphonetype'],
-                                          'model_id' => '', 'vendor_addon' => $result['SCCP_Vendor']['vendor_addon'],
-                                          'model_addon' => $result['SCCP_Vendor']['model_addon']
-                                          );
+        // Parse skinnyphonetype (e.g., "Cisco 7945 (SCCP)") into vendor/model
+        $vendor = 'Undefined';
+        $model = '';
+        $model_id = '';
+        if (!empty($result['skinnyphonetype'])) {
+            if (preg_match('/^(\S+)\s+(.+?)\s*\((.+?)\)/', $result['skinnyphonetype'], $matches)) {
+                $vendor = $matches[1];
+                $model = $matches[2];
+                $model_id = $matches[3];
+            } else {
+                // Fallback: just take first word as vendor
+                $parts = explode(' ', $result['skinnyphonetype']);
+                $vendor = $parts[0] ?? 'Undefined';
+                $model = implode(' ', array_slice($parts, 1)) ?: $result['skinnyphonetype'];
+            }
         }
+        
+        // Parse configphonetype for addon vendor/model
+        $vendor_addon = '';
+        $model_addon = '';
+        if (!empty($result['configphonetype'])) {
+            $addon_parts = explode(' ', $result['configphonetype'], 2);
+            $vendor_addon = $addon_parts[0] ?? '';
+            $model_addon = $addon_parts[1] ?? '';
+        }
+        
+        $result['SCCP_Vendor'] = array('vendor' => $vendor, 'model' => $model,
+                                       'model_id' => $model_id, 'vendor_addon' => $vendor_addon,
+                                       'model_addon' => $model_addon);
         $result['MAC_Address'] =$result['macaddress'];
         return $result;
     }

@@ -25,6 +25,12 @@ class aminterface
     private $debug_level = 1;
     private $_incomingRawMessage;
     private $eventListEndEvent;
+    private $paren_class = null;
+    private $_eventListeners = array();
+    private $_incomingMsgObjectList = array();
+    private $_context = null;
+    private $eventListIsCompleted = false;
+    public $useAmiInterface = true;
 
     public function load_subspace($parent_class = null)
     {

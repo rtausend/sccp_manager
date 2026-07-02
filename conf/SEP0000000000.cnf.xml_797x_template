@@ -51,12 +51,13 @@
   <vendorConfig>
     <disableSpeaker>false</disableSpeaker>
     <disableSpeakerAndHeadset>false</disableSpeakerAndHeadset>
+    <ehookEnable>0</ehookEnable>
     <forwardingDelay>1</forwardingDelay>
     <settingsAccess>1</settingsAccess>
     <videoCapability>1</videoCapability>
     <autoSelectLineEnable>0</autoSelectLineEnable>
     <webAccess>0</webAccess>
-    <daysDisplayNotActive>1,7</daysDisplayNotActive>
+    <daysDisplayNotActive></daysDisplayNotActive>
     <displayOnTime>08:30</displayOnTime>
     <displayOnDuration>11:30</displayOnDuration>
     <displayIdleTimeout>01:00</displayIdleTimeout>

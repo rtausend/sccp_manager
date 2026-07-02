@@ -541,9 +541,9 @@ and open the template in the editor. Base Version before all crash :-)
                 <name>daysdisplaynotactive</name>
                 <default></default>
                 <class>sccp-custom</class>
-                <options placeholder="1,7" />
+                <options placeholder="" />
             </input>
-            <help>Comma separated list of days that the phone's display is not active and will be automatically turned off after the time specified by "displayIdleTimeout" has elapsed (1 - Sunday, 7 - Saturday)</help>
+            <help>Weekdays when the display stays off outside the scheduled window (1=Sunday … 7=Saturday). Leave empty for the same schedule every day (value 0 on the phone). Example for weekends only: 1,7</help>
         </item>
         <item type="IE" id="3" seq="98">
             <label>Display On Start Time</label>
@@ -662,6 +662,18 @@ and open the template in the editor. Base Version before all crash :-)
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
             <help> Enable Link Layer Discovery Protocol on the PC (computer) port.</help>
+        </item>
+        <item type="IS" id="6" seq="98">
+            <name>ehookenable</name>
+            <label>Headset Hookswitch Control (EHS)</label>
+            <default>off</default>
+            <button value="off">Disabled</button>
+            <button value="on">Enabled</button>
+            <help>
+                Aktiviert die Headset-Hookswitch-Steuerung (EHS) für externe Headsets
+                (z. B. Jabra, Plantronics). Am Telefon oft schreibgeschützt — Wert wird
+                per TFTP-Provisioning gesetzt. Nur für unterstützte Modelle (z. B. 79xx/7975).
+            </help>
         </item>
     </page_group>
 
@@ -1291,15 +1303,13 @@ and open the template in the editor. Base Version before all crash :-)
             </input>
             <help>The MAC address of the phone</help>
         </item>
-        <item type="IE" id="2" seq="99">
+        <item type="SDM" id="2" seq="99">
             <label>Type</label>
-            <input>
-                <name>type</name>
-                <default>79XX</default>
-                <class>sccp-custom</class>
-                <options readonly="readonly"></options>
-            </input>
-            <help>The type of phone: 7911, 7940, 7960, etc. Important note: the 'G' models are handled as the base model (e.g., 7962G is handled as 7962). In the Display mode, this field is read-only because the MAC address and the model number are a pair.</help>
+            <name>type</name>
+            <default>7911</default>
+            <select name="model" dataid="dns" dataval="buttons">model</select>
+            <class>hw_select form-control</class>
+            <help>Phone model (e.g. 7941, 7975). Change this when the physical hardware was replaced. Button layout and XML template are updated on save. Check the Buttons tab if the button count changed.</help>
         </item>
         <item type="SDE" id="3" seq="99">
             <label>Addon</label>
@@ -1308,6 +1318,38 @@ and open the template in the editor. Base Version before all crash :-)
             <select name="model" dataval="buttons">description</select>
             <class>hw_select form-control</class>
             <help>Addon: Addons are model specific and only work with certain base phones. This phone model is identified as being a phone that does not accept sidecars. Update devmodel if this is not correct.</help>
+        </item>
+    </page_group>
+
+    <page_group name="sccp_hw_dev_edit_sip">
+        <label>General Device configuration</label>
+        <item type="IE" id="1" seq="99">
+            <label>Device ID</label>
+            <input>
+                <name>mac</name>
+                <default></default>
+                <class>sccp-custom</class>
+                <options readonly="readonly"></options>
+            </input>
+            <help>The MAC address of the phone</help>
+        </item>
+        <item type="IE" id="2" seq="99">
+            <label>Type</label>
+            <input>
+                <name>type</name>
+                <default>79XX</default>
+                <class>sccp-custom</class>
+                <options readonly="readonly"></options>
+            </input>
+            <help>The SIP phone type cannot be changed after creation.</help>
+        </item>
+        <item type="SDE" id="3" seq="99">
+            <label>Addon</label>
+            <name>addon</name>
+            <default>NONE</default>
+            <select name="model" dataval="buttons">description</select>
+            <class>hw_select form-control</class>
+            <help>Addon: Addons are model specific and only work with certain base phones.</help>
         </item>
     </page_group>
 
@@ -1366,6 +1408,14 @@ and open the template in the editor. Base Version before all crash :-)
             <button value="1">Enabled</button>
             <button value="0">Disabled</button>
             <help>This needs to be enabled to allow the server to push background or ringtones to the phone in the SEPXXXXXXXXXX.cnf.xml of each phone:</help>
+        </item>
+        <item type="SL" id="12" seq="97">
+            <label>Firmware Version (Load Image)</label>
+            <name>imageversion</name>
+            <default>NONE</default>
+            <select></select>
+            <class>fw_select form-control</class>
+            <help>Leave on Model default to use the firmware configured for this phone model. Select a specific firmware file to override for this device only.</help>
         </item>
         <item type="IE" id="6" seq="99">
             <label>Background Image</label>

@@ -44,6 +44,7 @@
   <vendorConfig>
     <disableSpeaker>false</disableSpeaker>
     <disableSpeakerAndHeadset>false</disableSpeakerAndHeadset>
+    <ehookEnable>0</ehookEnable>
     <forwardingDelay>1</forwardingDelay>
     <pcPort>0</pcPort>
     <settingsAccess>1</settingsAccess>

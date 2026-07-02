@@ -1,7 +1,8 @@
 <module>
 	<rawname>sccp_manager</rawname>
 	<name>SCCP Manager</name>
-	<version>14.5.0.4</version>
+	<version>14.6.0.1</version>
+	<phpversion>8.2</phpversion>
 	<type>setup</type>
 	<category>SCCP Connectivity</category>
 	<publisher>Steve Lad, Alex GP</publisher>
@@ -43,18 +44,18 @@
 		 * Version 14.4.0.5 * - Fix issue #59.
 		 * Version 14.5.0.2 * - Fix issue #32.
 		 * Version 14.5.0.4 * - Fix issue where values with spaces are truncated. Preserve softkeys accross installs
+		 * Version 14.6.0.1 * - Local packaging, module-relative paths, firmware per phone, SEP swap, lazy firmware status
 	</changelog>
-	<location>https://github.com/chan-sccp/sccp_manager</location>
+	<location>local-build</location>
 	<depends>
-		<version>15</version>
+		<version>14.6.0.1</version>
 		<phpversion>7.0</phpversion>
 		<phpcomponent>zip</phpcomponent>
 	</depends>
 	<supported>
-		<version>13.0.0.2M</version>
+		<version>14.6.0.1</version>
 	</supported>
-	<info>https://github.com/chan-sccp/sccp_manager</info>
-	<updateurl>https://raw.githubusercontent.com/chan-sccp/sccp_manager/develop/sccpManagerUpdater.json</updateurl>
+	<info>local-build</info>
 	<license>GPL</license>
 	<md5sum></md5sum>
 	<database>
@@ -81,9 +82,9 @@
 			<field name="directrtp" type="string" notnull="false"/>
 			<field name="softkeyset" type="string" length="100" default="softkeyset" notnull="false"/>
 			<field name="audio_tos" type="string" length="11" default="0xB8" notnull="false"/>
-			<field name="audio_cos" type="string" length="1" default="6" notnull="false"/>
+			<field name="audio_cos" type="string" length="11" default="0x6" notnull="false"/>
 			<field name="video_tos" type="string" length="11" default="0x88" notnull="false"/>
-			<field name="video_cos" type="string" length="1" default="5" notnull="false"/>
+			<field name="video_cos" type="string" length="11" default="0x5" notnull="false"/>
 			<field name="conf_allow" type="string" default="on"/>
 			<field name="conf_play_general_announce" type="string" length="3" default="on" notnull="false"/>
 			<field name="conf_play_part_announce" type="string" default="on"/>
@@ -122,6 +123,8 @@
 			<field name="_settingsaccess" type="string" notnull="false"/>
 			<field name="videocapability" type="string" default="off"/>
 			<field name="_videocapability" type="string" notnull="false"/>
+			<field name="ehookenable" type="string" default="off"/>
+			<field name="_ehookenable" type="string" notnull="false"/>
 			<field name="webaccess" type="string" default="off"/>
 			<field name="_webaccess" type="string" notnull="false"/>
 			<field name="webadmin" type="string" default="off"/>
@@ -274,6 +277,16 @@
 			 <field name="seq" type="boolean" primarykey="true"/>
 			 <field name="type" type="boolean" primarykey="true"/>
 			 <field name="systemdefault" type="string" length="255" notnull="false"/>
+		 </table>
+		 <table name="sccpnamedgroups">
+			 <field name="id" type="integer" primarykey="true" autoincrement="true"/>
+			 <field name="groupname" type="string" length="100" notnull="true"/>
+			 <field name="grouptype" type="string" length="20" default="callgroup" notnull="false"/>
+			 <field name="description" type="string" length="255" notnull="false"/>
+			 <field name="created_on" type="datetime" notnull="false"/>
+			 <key name="groupname" type="unique">
+				 <column name="groupname"/>
+			 </key>
 		 </table>
 	</database>
 </module>

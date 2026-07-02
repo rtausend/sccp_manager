@@ -18,6 +18,19 @@ trait bmoFunctions {
         $this->doGeneralPost();
     }
 
+    public function doGeneralPost() {
+        if (!isset($_POST) || empty($_POST)) {
+            return;
+        }
+
+        $category = isset($_POST['category']) ? $_POST['category'] : '';
+        
+        // Handle SCCP Line editing
+        if ($category === 'edit_sccp_line') {
+            $this->saveSccpLine($_POST);
+        }
+    }
+
     // Try to change extensions which is part of core
 /*
     public static function myGuiHooks() {
@@ -96,6 +109,10 @@ trait bmoFunctions {
                 if (empty($request['tech_hardware'])) {
                     break;
                 }
+                $cancelHash = '#sccpdevice';
+                if ($request['tech_hardware'] === 'sccp_custom' && !empty($request['extdisplay'])) {
+                    $cancelHash = '#general';
+                }
                 $buttons = array(
                     'submit' => array(
                         'name' => 'ajaxsubmit',
@@ -112,7 +129,7 @@ trait bmoFunctions {
                         'name' => 'cancel',
                         'id' => 'ajaxcancel',
                         'data-search' => '?display=sccp_phone',
-                        'data-hash' => 'sccpdevice',
+                        'data-hash' => $cancelHash,
                         'value' => _("Cancel")
                     ),
                 );
@@ -138,15 +155,8 @@ trait bmoFunctions {
     }
 
     public function getRightNav($request) {
-        global $amp_conf;
         if (isset($request['tech_hardware']) && ($request['tech_hardware'] == 'cisco')) {
-            return load_view($amp_conf['AMPWEBROOT'] .'/admin/modules/sccp_manager/views/hardware.rnav.php', array('request' => $request));
-        }
-    }
-
-    public function doGeneralPost() {
-        if (!isset($_REQUEST['Submit'])) {
-            return;
+            return load_view(sccp_manager_path('views/hardware.rnav.php'), array('request' => $request));
         }
     }
 }

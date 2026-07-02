@@ -31,7 +31,7 @@ $compatible = $this->aminterface->get_compatible_sccp();
 $info = array();
 
 //$info['srvinterface'] = $this->srvinterface->info();
-$moduleXml = simplexml_load_file("{$amp_conf['AMPWEBROOT']}/admin/modules/sccp_manager/module.xml");
+$moduleXml = simplexml_load_file(sccp_manager_path('module.xml'));
 $info['extconfigs'] = $this->extconfigs->info();
 $info['dbinterface'] = $this->dbinterface->info();
 $info['aminterface'] = $this->aminterface->info();
@@ -147,7 +147,7 @@ $conf_tz = $this->sccpvalues['ntp_timezone']['data'];
 $cisco_tz = $this->extconfigs->getExtConfig('sccp_timezone', $conf_tz);
 if ($cisco_tz['offset'] == 0) {
     if (!empty($conf_tz)) {
-        $tmp_dt = new DateTime(null, new DateTimeZone($conf_tz));
+        $tmp_dt = new DateTime('now', new DateTimeZone($conf_tz));
         $tmp_ofset = $tmp_dt->getOffset();
         if (($cisco_tz['offset'] != ($tmp_ofset / 60) )) {
             $this->info_warning['NTP'] = array('The selected NTP time zone is not supported by cisco devices.', 'We will use the Greenwich Time zone');

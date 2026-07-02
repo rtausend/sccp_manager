@@ -29,6 +29,8 @@ if (!empty($_REQUEST['id'])) {
     $dev_id = $_REQUEST['id'];
 
     $db_res = $this->dbinterface->getSccpDeviceTableData('get_sccpdevice_byid', array("id" => $dev_id));
+    $defaultLineRow = $this->dbinterface->getSccpDeviceTableData('getDefaultLine', array('id' => $dev_id));
+    $defaultLineName = (is_array($defaultLineRow) && isset($defaultLineRow['name'])) ? $defaultLineRow['name'] : '';
     foreach ($db_res as $key => $val) {
         if (!empty($val)) {
             switch ($key) {
@@ -51,7 +53,7 @@ if (!empty($_REQUEST['id'])) {
                     }
                     $def_val[$key] = array("keyword" => $key, "data" => $val, "seq" => "99");
                     // Need to assign defaultLine as not set in the db.
-                    $def_val['defaultLine'] = $this->dbinterface->getSccpDeviceTableData('getDefaultLine', array('id' => $dev_id))['name'];
+                    $def_val['defaultLine'] = $defaultLineName;
                     break;
             }
         }
@@ -59,7 +61,8 @@ if (!empty($_REQUEST['id'])) {
 }
 
 if (!empty($def_val['type'])) {
-    $tmp_raw = $this->getSccpModelInformation('byid', true, 'all', array('model'=>$def_val['type']));
+    $type_model = is_array($def_val['type']) ? $def_val['type']['data'] : $def_val['type'];
+    $tmp_raw = $this->getSccpModelInformation('byid', true, 'all', array('model'=>$type_model));
     if (!empty($tmp_raw[0])) {
         $tmp_raw = $tmp_raw[0];
     }
@@ -119,7 +122,11 @@ if (!empty($def_val['type'])) {
         if (empty($dev_id)) {
             echo $this->showGroup('sccp_hw_dev', 1, 'sccp_hw', $def_val);
         } else {
-            echo $this->showGroup('sccp_hw_dev_edit', 1, 'sccp_hw', $def_val);
+            if ($_REQUEST['tech_hardware'] == 'cisco-sip') {
+                echo $this->showGroup('sccp_hw_dev_edit_sip', 1, 'sccp_hw', $def_val);
+            } else {
+                echo $this->showGroup('sccp_hw_dev_edit', 1, 'sccp_hw', $def_val);
+            }
         }
         echo $this->showGroup('sccp_hw_dev2', 1, 'sccp_hw', $def_val);
         echo $this->showGroup('sccp_hw_dev_advance', 1, 'sccp_hw', $def_val);
@@ -141,7 +148,7 @@ if (!empty($def_val['type'])) {
         if (empty($dev_id)) {
             echo $this->showGroup('sccp_hw_sip_dev', 1, 'sccp_hw', $def_val);
         } else {
-            echo $this->showGroup('sccp_hw_dev_edit', 1, 'sccp_hw', $def_val);
+            echo $this->showGroup('sccp_hw_dev_edit_sip', 1, 'sccp_hw', $def_val);
         }
         echo $this->showGroup('sccp_hw_sip_dev2', 1, 'sccp_hw', $def_val);
         echo $this->showGroup('sccp_hw_sip_conf', 1, 'sccp_hw', $def_val);

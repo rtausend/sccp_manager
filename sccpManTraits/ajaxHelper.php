@@ -13,6 +13,7 @@ trait ajaxHelper {
             case 'save_device':
             case 'save_sip_device':
             case 'save_ruser':
+            case 'save_sccp_line':
             case 'save_dialplan_template':
             case 'delete_hardware':
             case 'getPhoneGrid':
@@ -34,6 +35,16 @@ trait ajaxHelper {
             case 'updateSoftKey':
             case 'deleteSoftKey':
             case 'delete_dialplan':
+            case 'getNamedGroups':
+            case 'addNamedGroup':
+            case 'updateNamedGroup':
+            case 'deleteNamedGroup':
+            case 'preview_swap_device':
+            case 'swap_device':
+            case 'get_firmware_catalog':
+            case 'get_phone_firmware_status':
+            case 'preview_firmware_assign':
+            case 'assign_firmware':
                 return true;
                 break;
             case 'validateMac':
@@ -66,6 +77,20 @@ trait ajaxHelper {
                 //$res = $request;
                 $res = $this->handleRoamingUsers($request);
                 return array('status' => true, 'search' => '?display=sccp_phone', 'hash' => 'general');
+                break;
+            case 'save_sccp_line':
+                if ($this->saveSccpLine($request)) {
+                    $this->aminterface->core_sccp_reload();
+                    return array(
+                        'status' => true,
+                        'message' => _('Line saved'),
+                        'reload' => false,
+                        'toastFlag' => 'success',
+                        'search' => '?display=sccp_phone',
+                        'hash' => '#general'
+                    );
+                }
+                return array('status' => false, 'message' => _('Failed to save line'));
                 break;
             case 'save_dialplan_template':
                 /* !TODO!: -TODO-: dialplan templates should be removed (only required for very old devices (like ATA) */
@@ -123,7 +148,7 @@ trait ajaxHelper {
                     }
                 };
 
-                if ($this->sccpvalues['siptftp']['data'] == 'on') { // Check SIP Support Enabled
+                if (($this->sccpvalues['siptftp']['data'] ?? 'off') === 'on') { // Check SIP Support Enabled
                     $this->createSccpXmlSoftkey(); // Create Softkey Sets for SIP
                 }
                 // !TODO!: -TODO-: Do these returned message strings work with i18n ?
@@ -318,6 +343,7 @@ trait ajaxHelper {
                 }
                 // Find all devices currently connected
                 $activeDevices = $this->aminterface->sccp_get_active_device();
+                $this->enrichPhoneGridFirmwareData($dbDevices, $activeDevices);
 
                 foreach ($dbDevices as &$dev_id) {
                     if (!empty($activeDevices[$dev_id['name']])) {
@@ -371,6 +397,36 @@ trait ajaxHelper {
                     $result = array();
                 }
                 return $result;
+                break;
+            case 'getNamedGroups':
+                return $this->getNamedGroupsList();
+                break;
+            case 'addNamedGroup':
+                return $this->addNamedGroup($request);
+                break;
+            case 'updateNamedGroup':
+                return $this->updateNamedGroup($request);
+                break;
+            case 'deleteNamedGroup':
+                return $this->deleteNamedGroup($request);
+                break;
+            case 'preview_swap_device':
+                return $this->previewSwapDevice($request);
+                break;
+            case 'swap_device':
+                return $this->handleSwapDeviceRequest($request);
+                break;
+            case 'get_firmware_catalog':
+                return $this->handleGetFirmwareCatalogRequest($request);
+                break;
+            case 'get_phone_firmware_status':
+                return $this->handleGetPhoneFirmwareStatusRequest($request);
+                break;
+            case 'preview_firmware_assign':
+                return $this->handlePreviewFirmwareAssignRequest($request);
+                break;
+            case 'assign_firmware':
+                return $this->handleAssignFirmwareRequest($request);
                 break;
             case 'backupsettings':
                 // -------------------------------   Old device support - In the development---
@@ -449,8 +505,8 @@ trait ajaxHelper {
                 if (isset($tmpArr[0]['internal'])) {
                     $request[$hdr_arprefix.$keyVal][0] = $tmpArr[0];
                 } else {
-                    $request[$hdr_arprefix.$keyVal][1]['net'] = $tmpArr[0]['net'];
-                    $request[$hdr_arprefix.$keyVal][1]['mask'] = $tmpArr[0]['mask'];
+                    $request[$hdr_arprefix.$keyVal][1]['net'] = $tmpArr[0]['net'] ?? '';
+                    $request[$hdr_arprefix.$keyVal][1]['mask'] = $tmpArr[0]['mask'] ?? '';
                 }
             }
         }
@@ -461,6 +517,19 @@ trait ajaxHelper {
             $key = (str_replace($hdr_arprefix, '', $key, $count_mods));
             if ($count_mods) {
                 // Only arrays : network lists or ip lists.
+                if (!isset($this->sccpvalues[$key])) {
+                    $this->ensureSccpSettingsComplete();
+                }
+                if (!isset($this->sccpvalues[$key])) {
+                    $save_settings[$key] = array(
+                        'keyword' => $key,
+                        'type' => '2',
+                        'seq' => '98',
+                        'data' => $this->convertArrayToCsv($value),
+                        'systemdefault' => '',
+                    );
+                    continue;
+                }
                 $save_settings[$key]['keyword'] = $key;
                 $save_settings[$key]['type'] = $this->sccpvalues[$key]['type'];
                 $save_settings[$key]['seq'] = $this->sccpvalues[$key]['seq'];
@@ -651,12 +720,23 @@ trait ajaxHelper {
         $hdr_prefix = 'sccp_hw_';
         $hdr_arprefix = 'sccp_hw-ar_';
         $hdr_vendPrefix = 'vendorconfig_';
+        $vendorEnumFields = array(
+            'settingsaccess', 'videocapability', 'webaccess', 'webadmin', 'pcport',
+            'spantopcport', 'voicevlanaccess', 'enablecdpswport', 'enablecdppcport',
+            'enablelldpswport', 'enablelldppcport', 'ehookenable',
+        );
         $save_buttons = array();
         $save_settings = array();
         $save_codec = array();
         $name_dev = '';
+        $typeChangeWarning = '';
+        $oldDevice = null;
         $db_field = array_keys($this->dbinterface->getSccpDeviceTableData("get_columns_sccpdevice"));
         $hw_id = (empty($get_settings['sccp_device_id'])) ? 'new' : $get_settings['sccp_device_id'];
+        $hw_type = (empty($get_settings['sccp_device_typeid'])) ? 'sccpdevice' : $get_settings['sccp_device_typeid'];
+        if ($hw_id != 'new') {
+            $oldDevice = $this->dbinterface->getSccpDeviceTableData('get_sccpdevice_byid', array('id' => $hw_id));
+        }
         $hw_type = (empty($get_settings['sccp_device_typeid'])) ? 'sccpdevice' : $get_settings['sccp_device_typeid'];
         $update_hw = ($hw_id == 'new') ? 'add' : 'clear'; // Clear is delete + add. Only used for buttons
         $hw_prefix = 'SEP';
@@ -704,18 +784,28 @@ trait ajaxHelper {
                         }
                     }
                     break;
+                case 'imageversion':
+                    if (!empty($get_settings["{$hdr_prefix}{$key}"])) {
+                        $value = $get_settings["{$hdr_prefix}{$key}"];
+                    }
+                    if ($value === 'NONE' || $value === '') {
+                        $save_settings[$key] = $this->val_null;
+                    } elseif (!empty($value)) {
+                        $save_settings[$key] = $value;
+                    }
+                    break;
                 default:
                     // handle vendor prefix
-                    if (!empty($get_settings["${hdr_vendPrefix}${key}"])) {
-                        $value = $get_settings["${hdr_vendPrefix}${key}"];
+                    if (!empty($get_settings["{$hdr_vendPrefix}{$key}"])) {
+                        $value = $get_settings["{$hdr_vendPrefix}{$key}"];
                     }
                     // handle array prefix
-                    if (!empty($get_settings["${hdr_arprefix}${key}"])) {
+                    if (!empty($get_settings["{$hdr_arprefix}{$key}"])) {
                         // Only 3 types of array returned permit,deny, setvar
                         $arr_data = '';
                         $arr_clear = false;
                         $output = array();
-                        foreach ($get_settings["${hdr_arprefix}${key}"] as $netValue) {
+                        foreach ($get_settings["{$hdr_arprefix}{$key}"] as $netValue) {
                             switch ($key) {
                                 case 'permit':
                                 case 'deny';
@@ -730,7 +820,7 @@ trait ajaxHelper {
                                         $output[] = 'internal';
                                         continue 2;
                                     }
-                                    if (empty($netValue['net'])) {
+                                    if (!is_array($netValue) || !array_key_exists('net', $netValue) || empty($netValue['net'])) {
                                         // empty net so ignored
                                         continue 2;
                                     }
@@ -752,9 +842,30 @@ trait ajaxHelper {
                     $value = $get_settings["{$hdr_prefix}{$key}"];
                 }
             }
-            if (!empty($value)) {
+            if (in_array($key, $vendorEnumFields, true) && array_key_exists("{$hdr_vendPrefix}{$key}", $get_settings)) {
+                $save_settings[$key] = $get_settings["{$hdr_vendPrefix}{$key}"];
+            } elseif (!empty($value)) {
                 $save_settings[$key] = $value;
             }
+        }
+        if (!empty($save_settings['type'])) {
+            $modelInfo = $this->getSccpModelInformation('byid', false, 'all', array('model' => $save_settings['type']));
+            if (empty($modelInfo)) {
+                return array('status' => false, 'message' => _('Unknown phone model: ') . $save_settings['type']);
+            }
+            $modelRow = $modelInfo[0];
+            if (!empty($save_settings['addon']) && $save_settings['addon'] !== $this->val_null
+                && ($modelRow['dns'] ?? 0) <= 1) {
+                $save_settings['addon'] = $this->val_null;
+                $typeChangeWarning .= ' ' . _('Addon removed because the selected model does not support sidecars.');
+            }
+        }
+        if (!empty($oldDevice['type']) && !empty($save_settings['type']) && $oldDevice['type'] !== $save_settings['type']) {
+            $typeChangeWarning .= ' ' . sprintf(
+                _('Device type changed from %s to %s. Review the Buttons tab if the button count changed.'),
+                $oldDevice['type'],
+                $save_settings['type']
+            );
         }
         // Save this device.
         $this->dbinterface->write('sccpdevice', $save_settings, 'replace');
@@ -766,11 +877,25 @@ trait ajaxHelper {
         // so that it loads the file from TFT.
         $msg = "Device Saved";
         $toastFlag = 'success';
+        if ($typeChangeWarning !== '') {
+            $msg .= $typeChangeWarning;
+            $toastFlag = 'warning';
+        }
         if (!$this->createSccpDeviceXML($name_dev)){
             // will only be false if creating SIP SEP with no line.
             $msg = "Device Saved but SEP config file not created as no SIP line attached to this device";
             $toastFlag = 'warning';
         };
+        if (!empty($save_settings['imageversion']) && $save_settings['imageversion'] !== $this->val_null) {
+            $validation = $this->validateFirmwareFile(
+                $save_settings['type'] ?? ($get_settings["{$hdr_prefix}type"] ?? ''),
+                $save_settings['imageversion']
+            );
+            if (!$validation['valid']) {
+                $msg .= ' ' . $validation['message'];
+                $toastFlag = 'warning';
+            }
+        }
         $hash = '#sipdevice';
         if ($get_settings['sccp_device_typeid'] != 'sipdevice') {
             $hash = '#sccpdevice';
@@ -783,6 +908,166 @@ trait ajaxHelper {
         }
         $search = '?display=sccp_phone';
         return array('status' => true, 'message' => $msg, 'reload' => true, 'toastFlag' => $toastFlag, 'search' => $search, 'hash' => $hash);
+    }
+
+    /**
+     * Save SCCP Line configuration from form submission
+     */
+    public function saveSccpLine($request) {
+        if (empty($request['line_id'])) {
+            return false;
+        }
+
+        $line_id = $request['line_id'];
+
+        // Map form fields to database columns
+        $fieldMapping = array(
+            'sccp_label' => 'label',
+            'sccp_description' => 'description',
+            'sccp_cid_name' => 'cid_name',
+            'sccp_cid_num' => 'cid_num',
+            'sccp_context' => 'context',
+            'sccp_mailbox' => 'mailbox',
+            'sccp_vmnum' => 'vmnum',
+            'sccp_accountcode' => 'accountcode',
+            'sccp_transfer' => 'transfer',
+            'sccp_musicclass' => 'musicclass',
+        );
+
+        $updateData = array();
+        foreach ($fieldMapping as $formField => $dbColumn) {
+            if (array_key_exists($formField, $request)) {
+                $updateData[$dbColumn] = $request[$formField];
+            }
+        }
+
+        if (empty($updateData)) {
+            return false;
+        }
+
+        try {
+            $db = \FreePBX::Database();
+            $setParts = array();
+            $values = array();
+            foreach ($updateData as $column => $value) {
+                $setParts[] = "{$column} = ?";
+                $values[] = $value;
+            }
+            $values[] = $line_id;
+
+            $stmt = $db->prepare("UPDATE sccpline SET " . implode(", ", $setParts) . " WHERE name = ?");
+            $stmt->execute($values);
+
+            return true;
+        } catch (\Exception $e) {
+            error_log("ERROR saveSccpLine: Failed to update line {$line_id}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    // ==================== Named Groups Management ====================
+    private function getNamedGroupsList() {
+        $db = \FreePBX::Database();
+        $result = array();
+        try {
+            $stmt = $db->prepare("SELECT id, groupname, grouptype, description, created_on FROM sccpnamedgroups ORDER BY groupname");
+            $stmt->execute();
+            $groups = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+            
+            foreach ($groups as $group) {
+                // Check usage count in sccpline
+                $usage_stmt = $db->prepare("SELECT COUNT(*) as cnt FROM sccpline WHERE namedcallgroup = ? OR namedpickupgroup = ?");
+                $usage_stmt->execute(array($group['groupname'], $group['groupname']));
+                $usage = $usage_stmt->fetch(\PDO::FETCH_ASSOC);
+                
+                $group['usage_count'] = $usage['cnt'];
+                $result[] = $group;
+            }
+        } catch (\Exception $e) {
+            error_log("ERROR getNamedGroupsList: " . $e->getMessage());
+        }
+        return $result;
+    }
+
+    private function addNamedGroup($request) {
+        $db = \FreePBX::Database();
+        try {
+            if (empty($request['groupname'])) {
+                return array('status' => false, 'message' => 'Group name is required');
+            }
+            
+            $groupname = trim($request['groupname']);
+            $grouptype = $request['grouptype'] ?? 'callgroup';
+            $description = $request['description'] ?? '';
+            
+            // Check if group already exists
+            $check_stmt = $db->prepare("SELECT id FROM sccpnamedgroups WHERE groupname = ?");
+            $check_stmt->execute(array($groupname));
+            if ($check_stmt->fetch()) {
+                return array('status' => false, 'message' => 'Group name already exists');
+            }
+            
+            // Insert new group
+            $stmt = $db->prepare("INSERT INTO sccpnamedgroups (groupname, grouptype, description, created_on) VALUES (?, ?, ?, NOW())");
+            $stmt->execute(array($groupname, $grouptype, $description));
+            
+            return array('status' => true, 'message' => 'Group created successfully');
+        } catch (\Exception $e) {
+            error_log("ERROR addNamedGroup: " . $e->getMessage());
+            return array('status' => false, 'message' => 'Error creating group: ' . $e->getMessage());
+        }
+    }
+
+    private function updateNamedGroup($request) {
+        $db = \FreePBX::Database();
+        try {
+            if (empty($request['id']) || empty($request['groupname'])) {
+                return array('status' => false, 'message' => 'ID and group name are required');
+            }
+            
+            $id = intval($request['id']);
+            $groupname = trim($request['groupname']);
+            $grouptype = $request['grouptype'] ?? 'callgroup';
+            $description = $request['description'] ?? '';
+            
+            $stmt = $db->prepare("UPDATE sccpnamedgroups SET groupname = ?, grouptype = ?, description = ? WHERE id = ?");
+            $stmt->execute(array($groupname, $grouptype, $description, $id));
+            
+            return array('status' => true, 'message' => 'Group updated successfully');
+        } catch (\Exception $e) {
+            error_log("ERROR updateNamedGroup: " . $e->getMessage());
+            return array('status' => false, 'message' => 'Error updating group: ' . $e->getMessage());
+        }
+    }
+
+    private function deleteNamedGroup($request) {
+        $db = \FreePBX::Database();
+        try {
+            if (empty($request['id'])) {
+                return array('status' => false, 'message' => 'ID is required');
+            }
+            
+            $id = intval($request['id']);
+            $groupname = $request['groupname'] ?? '';
+            
+            // Check if group is in use
+            $usage_stmt = $db->prepare("SELECT COUNT(*) as cnt FROM sccpline WHERE namedcallgroup = ? OR namedpickupgroup = ?");
+            $usage_stmt->execute(array($groupname, $groupname));
+            $usage = $usage_stmt->fetch(\PDO::FETCH_ASSOC);
+            
+            if ($usage['cnt'] > 0) {
+                return array('status' => false, 'message' => 'Cannot delete group - it is used by ' . $usage['cnt'] . ' line(s). Please remove from all lines first.');
+            }
+            
+            // Delete the group
+            $stmt = $db->prepare("DELETE FROM sccpnamedgroups WHERE id = ?");
+            $stmt->execute(array($id));
+            
+            return array('status' => true, 'message' => 'Group deleted successfully');
+        } catch (\Exception $e) {
+            error_log("ERROR deleteNamedGroup: " . $e->getMessage());
+            return array('status' => false, 'message' => 'Error deleting group: ' . $e->getMessage());
+        }
     }
 }
 ?>

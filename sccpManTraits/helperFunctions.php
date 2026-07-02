@@ -24,7 +24,7 @@ trait helperfunctions {
             } else {
                 // have ip:port
                 $subArr = explode(":", $value);
-                $outputArr[] = array('ip' => $subArr[0], 'port' => $subArr[1]);
+                $outputArr[] = array('ip' => $subArr[0], 'port' => $subArr[1] ?? '');
             }
         }
         return $outputArr;
@@ -38,15 +38,22 @@ trait helperfunctions {
             return '';
         }
         $output = array();
+        $hasNetValue = false;
+        foreach ($arrayToConvert as $value) {
+            if (is_array($value) && isset($value['net'])) {
+                $hasNetValue = true;
+                break;
+            }
+        }
         // Internal is always element 0, nets and ips start at element 1.
-        if ((isset($arrayToConvert[1]['net'])) || (isset($arrayToConvert[0]['internal']))) {
+        if ($hasNetValue || (isset($arrayToConvert[0]['internal']))) {
             // Have net masks
             foreach ($arrayToConvert as $netValue) {
                 if (isset($netValue['internal'])) {
                     $output[] = 'internal';
                     continue;
                 }
-                if (empty($netValue['net'])) {
+                if (!is_array($netValue) || !array_key_exists('net', $netValue) || empty($netValue['net'])) {
                     // If network not set, user error, has added empty row so delete
                     continue;
                 }
@@ -137,6 +144,56 @@ trait helperfunctions {
         }
         return FALSE;
     }
+    private function isUnsetSccpDeviceValue($value): bool
+    {
+        return $value === null || $value === '' || $value === 'NULL';
+    }
+
+    private function isUnsetDaysDisplayNotActive($value): bool
+    {
+        // Cisco expects an empty tag for "every day"; 0 is not valid and phones fall back to 1,7.
+        return $this->isUnsetSccpDeviceValue($value) || $value === '0';
+    }
+
+    /**
+     * Apply MariaDB column defaults for unset per-device fields (in memory only).
+     * Used when generating SEP XML so Advanced/global device defaults apply without
+     * writing values into each sccpdevice row.
+     */
+    private function applySccpDeviceTableDefaults(array $dev_config): array
+    {
+        $tableDefaults = $this->getTableDefaults('sccpdevice', false);
+        foreach ($tableDefaults as $key => $meta) {
+            if (!is_array($meta) || !array_key_exists('data', $meta)) {
+                continue;
+            }
+            $defaultVal = $meta['data'];
+            $defaultUnset = ($key === 'daysdisplaynotactive')
+                ? $this->isUnsetDaysDisplayNotActive($defaultVal)
+                : $this->isUnsetSccpDeviceValue($defaultVal);
+            if ($defaultUnset) {
+                continue;
+            }
+            $deviceVal = $dev_config[$key] ?? null;
+            $deviceUnset = ($key === 'daysdisplaynotactive')
+                ? $this->isUnsetDaysDisplayNotActive($deviceVal)
+                : $this->isUnsetSccpDeviceValue($deviceVal);
+            if (!array_key_exists($key, $dev_config) || $deviceUnset) {
+                $dev_config[$key] = $defaultVal;
+            }
+        }
+        // Empty / unset = no excluded weekdays (display schedule applies every day).
+        // Cisco wants an empty <daysDisplayNotActive> tag, not 0 (0 is ignored → firmware default 1,7).
+        if (!array_key_exists('daysdisplaynotactive', $dev_config)
+            || $this->isUnsetDaysDisplayNotActive($dev_config['daysdisplaynotactive'])) {
+            $globalDefault = $tableDefaults['daysdisplaynotactive']['data'] ?? null;
+            if ($this->isUnsetDaysDisplayNotActive($globalDefault)) {
+                $dev_config['daysdisplaynotactive'] = '';
+            }
+        }
+        return $dev_config;
+    }
+
     private function getTableDefaults($table, $trim_underscore = true) {
         $def_val = array();
         // TODO: This is ugly and overkill - needs to be cleaned up in dbinterface
@@ -308,7 +365,7 @@ trait helperfunctions {
                 // write a sentinel to a tftp subdirectory to see if mapping is working
 
                 if (is_dir($testFtpDir) && is_writable($testFtpDir)) {
-                    $tempFile = "${testFtpDir}/{$remoteFileName}";
+                    $tempFile = "{$testFtpDir}/{$remoteFileName}";
                     file_put_contents($tempFile, $remoteFileContent);
                     // try to pull the written file through tftp.
                     // this way we can determine if mapping is active and using sccp_manager maps
@@ -428,6 +485,29 @@ trait helperfunctions {
             );
         }
         $cnf_wr->WriteConfig('sccp.conf', $conf_init);
+    }
+
+    public function ensureSccpSettingsComplete() {
+        if (empty($this->xml_data)) {
+            $sccp_compatible = 433;
+            if (!empty($this->aminterface)) {
+                $version = $this->aminterface->getSCCPVersion();
+                if (!empty($version['vCode'])) {
+                    $sccp_compatible = $version['vCode'];
+                }
+            }
+            $xml_vars = __DIR__ . '/../conf/sccpgeneral.xml.v' . $sccp_compatible;
+            if (!file_exists($xml_vars)) {
+                $xml_vars = __DIR__ . '/../conf/sccpgeneral.xml.v433';
+            }
+            if (file_exists($xml_vars)) {
+                $this->xml_data = simplexml_load_file($xml_vars);
+            }
+        }
+        if (empty($this->xml_data)) {
+            return;
+        }
+        $this->initVarfromXml();
     }
 
     public function initVarfromXml() {

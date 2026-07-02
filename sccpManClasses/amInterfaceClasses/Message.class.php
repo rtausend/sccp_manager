@@ -154,14 +154,14 @@ abstract class Message
                     if (!isset($value) || $value === null || strlen($value) == 0) {
                         return '';
                     }
-                    if (filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE)) {
+                    if (filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) !== null) {
                         return (boolean) $value;
-                    } elseif (filter_var($value, FILTER_SANITIZE_STRING, FILTER_NULL_ON_FAILURE)) {
-                        return (string) $value;
-                    } elseif (filter_var($value, FILTER_SANITIZE_FULL_SPECIAL_CHARS, FILTER_NULL_ON_FAILURE)) {
-                        return (string) htmlspecialchars($value, ENT_QUOTES);
                     } else {
-                        throw new AMIException("Incoming String is not sanitary. Skipping: '" . $value . "'\n");
+                        $sanitized = filter_var($value, FILTER_UNSAFE_RAW, FILTER_FLAG_STRIP_LOW);
+                        if ($sanitized === false || $sanitized === null) {
+                            throw new AMIException("Incoming String is not sanitary. Skipping: '" . $value . "'\n");
+                        }
+                        return (string) $sanitized;
                     }
                     break;
                 case 'numeric':
@@ -231,6 +231,7 @@ abstract class IncomingMessage extends Message
 {
 
     protected $rawContent;
+    protected $_completed = false;
 
     public function getEventList()
     {

@@ -169,7 +169,7 @@ foreach ($firmwareDir[0] as $child) {
     }
 };
 
-include($amp_conf['AMPWEBROOT'] . '/admin/modules/sccp_manager/views/getFileModal.html');
+include(dirname(__DIR__) . '/views/getFileModal.html');
 
 ?>
 <div class="modal fade" id="edit_model" tabindex="-1" role="dialog" aria-labelledby="myLargeModalLabel">

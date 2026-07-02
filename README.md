@@ -60,6 +60,36 @@ apt-get install PHP7.3-zip
 - The sccp_manager module will automatically setup and configure asterisk realtime database for chan-sccp.
   For more information about realtime [See chan-sccp wiki](https://github.com/chan-sccp/chan-sccp/wiki/Realtime-Configuration).
 
+## Local packaging (custom fork)
+
+This tree is maintained locally and is **not** tied to the outdated GitHub release channel.
+
+Build an installable FreePBX module archive from the current source:
+
+```bash
+cd /usr/src/sccp_manager
+./scripts/package-module.sh -u
+```
+
+The archive is written to `dist/sccp_manager-<version>.tgz` with the required top-level folder `sccp_manager/`.
+
+Install it with:
+
+```bash
+./scripts/install-local.sh
+```
+
+This copies the module into FreePBX and runs `fwconsole ma install sccp_manager -f`.
+
+Important: `fwconsole ma install` expects the **module name**, not a `.tgz` path.
+Do **not** run `fwconsole ma install /path/to/sccp_manager-14.6.0.1.tgz`.
+
+Alternatively upload the `.tgz` via **Admin -> Module Admin -> Upload Modules**.
+
+Notes:
+- `module.xml` no longer points to the upstream GitHub `updateurl`, so Module Admin will not offer the old web release over this fork.
+- Runtime code resolves module files from the installed copy (`__DIR__` / `sccp_manager_path.php`), not from a hardcoded web path.
+
 ## Installation
 
 How to install sccp_manager

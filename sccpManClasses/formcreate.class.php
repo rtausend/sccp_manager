@@ -6,6 +6,9 @@ class formcreate
 {
     use \FreePBX\modules\Sccp_Manager\sccpManTraits\helperFunctions;
 
+    private $buttonDefLabel = 'chan-sccp';
+    private $buttonHelpLabel = 'site';
+
     public function __construct($parent_class = null) {
         $this->buttonDefLabel = 'chan-sccp';
         $this->buttonHelpLabel = 'site';
@@ -21,6 +24,7 @@ class formcreate
         $usingSysDefaults = true;
         // if there are multiple inputs, take the first for res_id and shortId
         $shortId = (string)$child->input[0]->name;
+        $shortSysDefault = $sccp_defaults[$shortId]['systemdefault'] ?? '';
         $res_id = $npref.$shortId;
         if (!empty($metainfo[$shortId])) {
             if ($child->meta_help == '1' || $child->help == 'Help!') {
@@ -46,7 +50,7 @@ class formcreate
                         <i class="fa fa-question-circle fpbx-help-icon" data-for="<?php echo $res_id; ?>"></i>
                     </div>
         <?php
-                    if (!empty($sccp_defaults[$shortId]['systemdefault'])) {
+                    if (!empty($shortSysDefault)) {
                         // There is a system default, so add button to customise or reset
                         //-- Start include of defaults button --
                         echo "<div class=col-md-3>";
@@ -58,9 +62,10 @@ class formcreate
             $res_n =  (string)$value->name;
             $res_name = $npref . $res_n;
             //if (!empty($fvalues[$res_n])) {
-            $value->value = $fvalues[$res_n]['data'];
+            $value->value = $fvalues[$res_n]['data'] ?? '';
             if (!empty($fvalues[$res_n]['data'])) {
-                if ($sccp_defaults[$res_n]['systemdefault'] != $fvalues[$res_n]['data']) {
+                $fieldSysDefault = $sccp_defaults[$res_n]['systemdefault'] ?? '';
+                if ($fieldSysDefault != $fvalues[$res_n]['data']) {
                     $usingSysDefaults = false;
                 }
             }
@@ -80,7 +85,7 @@ class formcreate
             echo $value->value;
             $i ++;
         }
-        if (!empty($sccp_defaults[$shortId]['systemdefault'])) {
+        if (!empty($shortSysDefault)) {
 
         ?>
                     </div>
@@ -94,7 +99,8 @@ class formcreate
                                 echo "class=sccp-edit :checked ";
                             } else {
                                 // reverting to chan-sccp default values
-                                echo "class=sccp-restore data-default={$sccp_defaults[$res_n]['systemdefault']} ";
+                                $fieldSysDefault = $sccp_defaults[$res_n]['systemdefault'] ?? '';
+                                echo "class=sccp-restore data-default={$fieldSysDefault} ";
                             }
                             ?>
                         >
@@ -136,7 +142,7 @@ class formcreate
                             }
                             // Default to chan-sccp defaults, not xml defaults if reverting to defaults or empty
                             if ((empty($value->value)) || ($usingSysDefaults)) {
-                                $value->value = $sccp_defaults[$res_n]['systemdefault'];
+                                $value->value = $sccp_defaults[$res_n]['systemdefault'] ?? '';
                             }
                             if (empty($value->type)) {
                                 $value->type = 'text';
@@ -235,7 +241,10 @@ class formcreate
                                     if ($value['value']=='NONE' && empty($res_value)) {
                                         $res_vf = true;
                                     }
-                                    if ((isset($res_value[0]['internal'])) || ($res_value[0] == 'internal')) {
+                                    if (
+                                        (isset($res_value[0]) && is_array($res_value[0]) && isset($res_value[0]['internal'])) ||
+                                        (isset($res_value[0]) && $res_value[0] == 'internal')
+                                    ) {
                                         $res_vf = true;
                                         // Remove the value from $res_value so that do not add empty row for internal
                                         array_shift($res_value);
@@ -286,11 +295,17 @@ class formcreate
                                 foreach ($child->xpath('input') as $value) {
                                     $field_id = (string)$value['field'];
                                     $res_n = $res_id.'['.$i.']['.$field_id.']';
+                                    if (empty($opt_at[$field_id]['class'])) {
+                                        $opt_at[$field_id]['class'] = 'form-control';
+                                    }
                                     if (!empty($value->class)) {
                                         $opt_at[$field_id]['class']='form-control ' .(string)$value->class;
                                     }
 
-                                    $defValue = (isset($addrArr[$field_id])) ? $addrArr[$field_id]: "";
+                                    $defValue = "";
+                                    if (is_array($addrArr) && array_key_exists($field_id, $addrArr)) {
+                                        $defValue = $addrArr[$field_id];
+                                    }
                                     echo '<input type="text" name="'. $res_n.'" class="'.$opt_at[$field_id]['class'].'" value="'. $defValue .'"';
 
 
@@ -346,6 +361,7 @@ class formcreate
         $res_id = $npref.$res_n;
         $res_ext = str_replace($npref,'',$res_n);
         $usingSysDefaults = true;
+        $sysDefault = $sccp_defaults[$res_n]['systemdefault'] ?? '';
         if (!empty($metainfo[$res_n])) {
             if ($child->meta_help == '1' || $child->help == 'Help!') {
                 $child->help = $metaInfo[$res_n];
@@ -381,10 +397,10 @@ class formcreate
                             $res_v = (string)$fvalues[$res_n]['data'];
                         }
                     }
-                    if ($sccp_defaults[$res_n]['systemdefault'] != $res_v) {
+                    if ($sysDefault != $res_v) {
                         $usingSysDefaults = false;
                     }
-                    if (!empty($sccp_defaults[$res_n]['systemdefault'])) {
+                    if (!empty($sysDefault)) {
                     // There is a system default, so add button to customise or reset
                     // the closing } is after the code to include the button at line ~438
 
@@ -404,7 +420,7 @@ class formcreate
                                 echo " class=sccp-edit :checked ";
                             } else {
                                 // reverting to chan-sccp default values
-                                echo " data-default={$sccp_defaults[$res_n]['systemdefault']} class=sccp-restore ";
+                                echo " data-default={$sysDefault} class=sccp-restore ";
                             }
                             ?>
                         >
@@ -437,7 +453,7 @@ class formcreate
                         $opt_hide = '';
 
                         if ($usingSysDefaults) {
-                            $res_v = $sccp_defaults[$res_n]['systemdefault'];
+                            $res_v = $sysDefault;
                         }
                         if (!empty($child->option_hide)) {
                             $opt_hide = ' class="sccp_button_hide" data-vhide="'.$child->option_hide.'" data-clhide="'.$child->option_hide['class'].'" ';
@@ -453,7 +469,8 @@ class formcreate
                             if (in_array($value, $disabledButtons )) {
                                 $opt_disabled = 'disabled';
                             }
-                            $val_check = strtolower((string)$value[@value]);
+                            $buttonValue = (string) $value['value'];
+                            $val_check = strtolower($buttonValue);
                             if ($val_check == strtolower($res_v)) {
                                 $val_check = "checked";
                             } else {
@@ -463,7 +480,7 @@ class formcreate
                                    } else {$val_check = "";}
                                 } else {$val_check = "";}
                             }
-                            echo "<input type=radio name= {$res_id} id=${res_id}_{$i} value='{$value[@value]}' {$val_check} {$opt_hide} {$opt_disabled}>";
+                            echo "<input type=radio name= {$res_id} id={$res_id}_{$i} value='{$buttonValue}' {$val_check} {$opt_hide} {$opt_disabled}>";
                             echo "<label for= {$res_id}_{$i}>{$value}</label>";
                             $i++;
                         }
@@ -679,7 +696,7 @@ class formcreate
             <div class="row">
                 <div class="form-group">
                     <?php
-                    include($amp_conf['AMPWEBROOT'] . '/admin/modules/sccp_manager/views/getFileModal.html');
+                    include(dirname(__DIR__) . '/views/getFileModal.html');
                     ?>
 
                     <div class="col-md-3">
@@ -752,18 +769,26 @@ class formcreate
                 $assignedExts = \FreePBX::Sccp_manager()->dbinterface->getSccpDeviceTableData('getAssignedExtensions');
                 $select_opt = \FreePBX::Sccp_manager()->dbinterface->getSccpDeviceTableData('SccpExtension');
                 foreach ($assignedExts as $name => $nameArr ) {
-                      $select_opt[$name]['label'] .= " -  in use";
+                    $extKey = (string)$name;
+                    if (!isset($select_opt[$extKey])) {
+                        if (preg_match('/^([0-9]+)/', $extKey, $m) && isset($select_opt[$m[1]])) {
+                            $extKey = $m[1];
+                        } else {
+                            continue;
+                        }
+                    }
+                    $select_opt[$extKey]['label'] .= " -  in use";
                 }
-                $child->default = $fvalues['defaultLine'];
+                $child->default = $fvalues['defaultLine'] ?? null;
                 break;
             case 'SDMF':
                 // Sip extensions
                 $select_opt = \FreePBX::Sccp_manager()->dbinterface->getSipTableData('extensionList');
-                $child->default = $fvalues['defaultLine'];
+                $child->default = $fvalues['defaultLine'] ?? null;
                 break;
             case 'SDE':
                 $extension_list = \FreePBX::Sccp_manager()->dbinterface->getDb_model_info('extension', 'model');
-                $extension_list[] = array( 'model' => 'NONE', 'vendor' => 'CISCO', 'dns' => '0');
+                $extension_list[] = array( 'model' => 'NONE', 'vendor' => 'CISCO', 'dns' => '0', 'buttons' => '0', 'validate' => '-;-');
                 foreach ($extension_list as &$data) {
                     $d_name = explode(';', $data['model']);
                     if (is_array($d_name) && (count($d_name) > 1)) {

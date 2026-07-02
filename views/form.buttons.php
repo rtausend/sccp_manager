@@ -11,7 +11,7 @@ $forminfo =array(
                 );
 //$buttons_type=  array("empty","line","service","feature","speeddial");
 //   "feature","service" -- Add leter !
-$buttons_type=  array("empty","line","silent","monitor","speeddial","feature","adv.line");
+$buttons_type=  array("empty","line","silent","monitor","speeddial","feature","adv.line","service");
 $feature_list=  array('parkinglot'=>'Park Slots','monitor'=> "Record Calls",'devstate'=> "Change Status");
 
 if ($_REQUEST['tech_hardware'] === 'cisco') {
@@ -25,6 +25,33 @@ $hint_list  = $this->getHintInformation(true, array('context'=>'park-hints')) ;
 $line_id =0;
 $max_buttons =56;     //Don't know hardware type so set a maximum. On save, this is set to actual max buttons
 $show_buttons =1;
+$db_buttons_by_instance = array();
+$uses_zero_instance = false;
+
+/**
+ * Map GUI button slot (0-based) to sccpbuttonconfig row.
+ * DB may use instance 0-based (chan_sccp) or 1-based (manager save).
+ */
+$sccp_get_button_row = function ($slot) use (&$db_buttons_by_instance, &$uses_zero_instance) {
+    $instance = $uses_zero_instance ? $slot : ($slot + 1);
+    return $db_buttons_by_instance[$instance] ?? null;
+};
+
+/**
+ * Return extension id from a line button name (strips @instance and !silent).
+ */
+$sccp_line_exten_from_name = function ($name) {
+    $name = (string)$name;
+    if ($name === '') {
+        return '';
+    }
+    $name = preg_replace('/!.*$/', '', $name);
+    $at = strpos($name, '@');
+    if ($at !== false) {
+        $name = substr($name, 0, $at);
+    }
+    return $name;
+};
 
 if (!empty($_REQUEST['id'])) {
     $dev_id = $_REQUEST['id'];
@@ -53,6 +80,63 @@ if (!empty($_REQUEST['ru_id'])) {
     $db_buttons = $this->dbinterface->getSccpDeviceTableData('get_sccpdevice_buttons', array("id" => $dev_id));
     $show_buttons = $max_buttons;
 }
+
+if (!empty($db_buttons) && is_array($db_buttons)) {
+    foreach ($db_buttons as $row) {
+        $inst = (int)$row['instance'];
+        $db_buttons_by_instance[$inst] = $row;
+        if ($inst === 0) {
+            $uses_zero_instance = true;
+        }
+    }
+    unset($db_buttons);
+}
+
+$line_names = array();
+foreach ($lines_list as $line) {
+    $line_names[(string)$line['name']] = true;
+}
+
+/**
+ * Validate parsed button config; invalid DB rows must not appear as wrong GUI values.
+ */
+$sccp_button_config_valid = function ($buttontype, $name, $options, $feature_list, $line_names) use ($sccp_line_exten_from_name) {
+    switch ($buttontype) {
+        case 'empty':
+            return true;
+        case 'line':
+        case 'silent':
+            $ext = $sccp_line_exten_from_name($name);
+            return $ext !== '' && isset($line_names[$ext]);
+        case 'adv.line':
+            $ext = $sccp_line_exten_from_name($name);
+            return $ext !== '' && isset($line_names[$ext]);
+        case 'monitor':
+            $ext = $sccp_line_exten_from_name($name);
+            if ($ext !== '' && isset($line_names[$ext])) {
+                return true;
+            }
+            foreach ($options as $opt) {
+                if (strpos((string)$opt, '@') !== false) {
+                    $hint_ext = $sccp_line_exten_from_name($opt);
+                    if ($hint_ext !== '' && isset($line_names[$hint_ext])) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        case 'speeddial':
+            return trim((string)$name) !== '' || trim((string)($options[0] ?? '')) !== '';
+        case 'feature':
+            $ftype = (string)($options[0] ?? '');
+            return $ftype !== '' && array_key_exists($ftype, $feature_list);
+        case 'service':
+            $opts = is_array($options) ? implode(',', $options) : (string)$options;
+            return trim((string)$name) !== '' || trim($opts) !== '';
+        default:
+            return false;
+    }
+};
 
 ?>
 
@@ -92,9 +176,10 @@ if (!empty($_REQUEST['ru_id'])) {
     <?php
     for ($line_id = 0; $line_id <$max_buttons; $line_id ++) {
         $show_form_mode = '';
-        $defaul_tv = (empty($db_buttons[$line_id])) ?  "empty": $db_buttons[$line_id]['buttontype'];
-        $defaul_btn = (empty($db_buttons[$line_id])) ?  "": $db_buttons[$line_id]['name'];
-        $defaul_opt = (empty($db_buttons[$line_id])) ?  array(''): explode(',', $db_buttons[$line_id]['options']);
+        $btn_row = $sccp_get_button_row($line_id);
+        $defaul_tv = (empty($btn_row)) ?  "empty": $btn_row['buttontype'];
+        $defaul_btn = (empty($btn_row)) ?  "": $btn_row['name'];
+        $defaul_opt = (empty($btn_row)) ?  array(''): explode(',', (string)($btn_row['options'] ?? ''));
 
         $show_form_mode = $defaul_tv;
         $def_hint = '';       // Hint check Box
@@ -103,19 +188,27 @@ if (!empty($_REQUEST['ru_id'])) {
         $def_silent = '';
         $defaul_advline = '';
         $defaul_ftr = '';
-        if (strpos($defaul_btn, '@') >0) {
+        $defaul_fcod = '';
+        $defaul_svc_url = '';
+        if (strpos((string)$defaul_btn, '@') > 0) {
             $defaul_tv = 'adv.line';
             $show_form_mode = 'adv.line';
-            $defaul_btn = strtok($defaul_btn, '@');
-            $defaul_advline = strtok('@');
+            $parts = explode('@', (string)$defaul_btn, 2);
+            $defaul_btn = $parts[0];
+            $defaul_advline = $parts[1] ?? '';
         }
-        if ($line_id == 0) {
+        // New device: default button 0 to line — not when DB row exists but is invalid
+        if ($line_id == 0 && $defaul_tv == 'empty' && empty($btn_row)) {
+            $defaul_tv = 'line';
             $show_form_mode = 'line';
         }
-        if (stripos($defaul_btn, '!') >0) {
-            $defaul_btn = strtok($defaul_btn, '!');
+        if (stripos((string)$defaul_btn, '!') !== false) {
+            $defaul_btn = preg_replace('/!.*$/', '', (string)$defaul_btn);
             $defaul_tv = 'silent';
             $def_silent = 'checked';
+        }
+        if ($defaul_tv == "service") {
+            $defaul_svc_url = $btn_row['options'] ?? '';
         }
         if ($defaul_tv == "feature") {
             $defaul_ftr = $defaul_opt[0];
@@ -126,9 +219,9 @@ if (!empty($_REQUEST['ru_id'])) {
 
         foreach ($defaul_opt as $data_i) {
             if (strpos($data_i, '@')>0) {
-                $test_btn = strtok($data_i, '@');
+                $hint_parts = explode('@', $data_i, 2);
+                $test_btn = $hint_parts[0];
                 $def_hint = 'checked';
-                $defaul_btn = $data_i;
                 $def_hint_btn = $data_i;
                 if ($test_btn == $defaul_opt[0]) {
                     foreach ($lines_list as $data) {
@@ -140,6 +233,38 @@ if (!empty($_REQUEST['ru_id'])) {
                         }
                     }
                 }
+            }
+        }
+
+        if (!empty($btn_row) && !$sccp_button_config_valid($defaul_tv, $defaul_btn, $defaul_opt, $feature_list, $line_names)) {
+            if ($line_id == 0) {
+                $defaul_btn = '';
+                $defaul_advline = '';
+                $defaul_opt = array('');
+                $def_hint = '';
+                $def_hint_btn = '';
+                $def_park = '';
+                $def_silent = '';
+                $defaul_ftr = '';
+                $defaul_fcod = '';
+                $defaul_svc_url = '';
+                if ($defaul_tv !== 'adv.line') {
+                    $defaul_tv = 'line';
+                    $show_form_mode = 'line';
+                }
+            } else {
+                $defaul_tv = 'empty';
+                $show_form_mode = 'empty';
+                $defaul_btn = '';
+                $defaul_advline = '';
+                $defaul_opt = array('');
+                $def_hint = '';
+                $def_hint_btn = '';
+                $def_park = '';
+                $def_silent = '';
+                $defaul_ftr = '';
+                $defaul_fcod = '';
+                $defaul_svc_url = '';
             }
         }
 
@@ -157,7 +282,8 @@ if (!empty($_REQUEST['ru_id'])) {
                         <select class="form-control buttontype" data-id="<?php echo $line_id;?>" name="<?php echo $forminfo[1]['name'].$line_id.'_type';?>">
                     <?php
                     if ($line_id == 0) {
-                        echo '<option value="line" selected >DEF LINE</option>';
+                        echo '<option value="line" '.(($defaul_tv == 'line')?'selected':'').' >DEF LINE</option>';
+                        echo '<option value="adv.line" '.(($defaul_tv == 'adv.line')?'selected':'').' >DEF ADV.LINE</option>';
                     } else {
                         foreach ($buttons_type as $data) {
                             $select = (($data == $defaul_tv)?"selected":"");
@@ -180,8 +306,9 @@ if (!empty($_REQUEST['ru_id'])) {
 <!--  if Line Type = line Show SCCP Num -->
                         <select data-type='line' class ="form-control lineid_<?php echo $line_id.(($show_form_mode=='line' || $show_form_mode=='adv.line')?'':' hidden');?>" name="<?php echo $forminfo[1]['name'].$line_id.'_line';?>" id="<?php echo $forminfo[1]['name'].$line_id.'_line';?>">
                         <?php
+                        echo '<option value=""'.($defaul_btn === '' ? ' selected="selected"' : '').'>--</option>';
                         foreach ($lines_list as $data) {
-                            $select = (($data['name']==$defaul_btn)?'selected="selected"':"");
+                            $select = (($defaul_btn !== '') && ($data['name']==$defaul_btn))?'selected="selected"':"";
                             echo '<option value="'.$data['name'].'" '.$select.' >'.$data['name'].' / '.$data['label'].'</option>';
                         }
                         ?>
@@ -189,7 +316,13 @@ if (!empty($_REQUEST['ru_id'])) {
 <!--  if Line Type = Othe Show  Input -->
                         <div data-type='speeddial' class="lineid_<?php echo $line_id.(($show_form_mode=='speeddial')? '':' hidden');?>" >
                             <?php
-                            echo '<input class="form-control" type="text" id="'.$forminfo[1]['name'].$line_id.'_input"  name="'.$forminfo[1]['name'].$line_id.'_input" placeholder="Name" value="'.$db_buttons[$line_id]['name'].'" >';
+                            echo '<input class="form-control" type="text" id="'.$forminfo[1]['name'].$line_id.'_input"  name="'.$forminfo[1]['name'].$line_id.'_input" placeholder="Name" value="'.htmlspecialchars((string)$defaul_btn).'" >';
+                            ?>
+                        </div>
+<!--  if Line Type = service Show Label -->
+                        <div data-type='service' class="lineid_<?php echo $line_id.(($show_form_mode=='service')? '':' hidden');?>" >
+                            <?php
+                            echo '<input class="form-control" type="text" id="'.$forminfo[1]['name'].$line_id.'_slabel" name="'.$forminfo[1]['name'].$line_id.'_slabel" placeholder="Label" value="'.htmlspecialchars((string)$defaul_btn).'">';
                             ?>
                         </div>
                         </div>
@@ -207,6 +340,7 @@ if (!empty($_REQUEST['ru_id'])) {
                             echo '</div><div class="col-xs-5">';
 
                             echo '<select  class="form-control" name="'.$forminfo[1]['name'].$line_id.'_hline" >';
+                            echo '<option value="" '.(($def_hint_btn=="")?"selected":"").' >-- no hint --</option>';
 
                             foreach ($hint_list as $data) {
                                 $select = (($data['key']==$def_hint_btn)?"selected":"");
@@ -220,7 +354,7 @@ if (!empty($_REQUEST['ru_id'])) {
                         <div data-type='feature' class="lineid_<?php echo $line_id.(($show_form_mode=='feature')? '':' hidden');?>" name="<?php echo $forminfo[1]['name'].$line_id.'_hint';?>">
                             <div class="col-xs-4">
                             <?php
-                            echo '<input class="form-control" type="text" id="'.$forminfo[1]['name'].$line_id.'_flabel"  name="'.$forminfo[1]['name'].$line_id.'_flabel" placeholder="Display Label" value="'.$db_buttons[$line_id]['name'].'" >';
+                            echo '<input class="form-control" type="text" id="'.$forminfo[1]['name'].$line_id.'_flabel"  name="'.$forminfo[1]['name'].$line_id.'_flabel" placeholder="Display Label" value="'.$defaul_btn.'" >';
                             ?>
                             </div>
                             <div class="col-xs-4">
@@ -239,7 +373,7 @@ if (!empty($_REQUEST['ru_id'])) {
                             </div>
                             <div class="col-xs-5">
                             <?php
-                            echo '<input class="form-control" type="text" id="'.$forminfo[1]['name'].$line_id.'_advopt"  name="'.$forminfo[1]['name'].$line_id.'_advopt" placeholder="ButtonLabel,Options" value="'.$db_buttons[$line_id]['options'].'" >';
+                            echo '<input class="form-control" type="text" id="'.$forminfo[1]['name'].$line_id.'_advopt"  name="'.$forminfo[1]['name'].$line_id.'_advopt" placeholder="ButtonLabel,Options" value="'.implode(',', $defaul_opt).'" >';
                             ?>
                             </div>
                         </div>
@@ -253,6 +387,15 @@ if (!empty($_REQUEST['ru_id'])) {
                             ?>
                                 </div>
                              </div>
+                        </div>
+
+<!--  if Line Type = service Show URL -->
+                        <div data-type='service' class="lineid_<?php echo $line_id.(($show_form_mode=='service')? '':' hidden');?>">
+                            <div class="col-xs-12">
+                            <?php
+                            echo '<input class="form-control" type="text" id="'.$forminfo[1]['name'].$line_id.'_surl" name="'.$forminfo[1]['name'].$line_id.'_surl" placeholder="Service URL" value="'.htmlspecialchars($defaul_svc_url).'">';
+                            ?>
+                            </div>
                         </div>
 
                     </div>

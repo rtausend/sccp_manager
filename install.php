@@ -4,6 +4,11 @@ if (!defined('FREEPBX_IS_AUTH')) {
     die_freepbx('No direct script access allowed');
 }
 
+require_once __DIR__ . '/sccp_manager_path.php';
+if (!defined('SCCP_MANAGER_MODULE_DIR')) {
+    define('SCCP_MANAGER_MODULE_DIR', __DIR__);
+}
+
 global $db;
 global $amp_conf;
 global $version;
@@ -29,6 +34,9 @@ $cnf_int = \FreePBX::Config();
 
 $thisInstaller = new class{
     use \FreePBX\modules\Sccp_Manager\sccpManTraits\helperFunctions;
+
+    public $xml_data = null;
+    public $sccpvalues = array();
 };
 
 $requiredClasses = array('aminterface', 'extconfigs');
@@ -56,6 +64,7 @@ createBackUpConfig();
 RenameConfig();
 
 $db_config   = Get_DB_config($sccp_compatible);
+ensureMissingDeviceColumns();
 InstallDB_updateSchema($db_config);
 
 cleanUpSccpSettings();
@@ -220,6 +229,7 @@ function Get_DB_config($sccp_compatible)
               'displayidletimeout' => array('create' => "VARCHAR(20) NULL default null", 'modify' => "VARCHAR(20)"),
               'settingsaccess' => array('create' => "enum('on','off') NOT NULL default 'off'", 'modify' => "enum('on','off')"),
               'videocapability' => array('create' => "enum('on','off') NOT NULL default 'off'", 'modify' => "enum('on','off')"),
+              'ehookenable' => array('create' => "enum('on','off') NOT NULL DEFAULT 'off'", 'modify' => "enum('on','off')"),
               'webaccess' => array('create' => "enum('on','off') NOT NULL default 'off'", 'modify' => "enum('on','off')"),
               'webadmin' => array('create' => "enum('on','off') NOT NULL default 'off'", 'modify' => "enum('on','off')"),
               'pcport' => array('create' => "enum('on','off') NOT NULL default 'on'", 'modify' => "enum('on','off')"),
@@ -260,6 +270,7 @@ function Get_DB_config($sccp_compatible)
               '_displayidletimeout' => array('rename' => 'displayidletimeout'),
               '_settingsaccess' => array('rename' => 'settingsaccess'),
               '_videocapability' => array('rename' =>  'videocapability'),
+              '_ehookenable' => array('rename' => 'ehookenable'),
               '_webaccess' => array('rename' =>  'webaccess'),
               '_webadmin' => array('rename' =>  'webadmin'),
               '_pcport' => array('rename' =>  'pcport'),
@@ -339,7 +350,7 @@ function CheckPermissions()
 {
     global $amp_conf;
     outn("<li>" . _("Checking Filesystem Permissions") . "</li>");
-    $dst = $amp_conf['AMPWEBROOT'] . '/admin/modules/sccp_manager/views';
+    $dst = sccp_manager_path('views');
     if (fileowner($amp_conf['AMPWEBROOT']) != fileowner($dst)) {
         die_freepbx('Please (re-)check permissions by running "amportal chown. Installation Failed"');
     }
@@ -368,7 +379,22 @@ function CheckAsteriskVersion()
 function CheckChanSCCPCompatible()
 {
     global $aminterface;
-    return $aminterface->getSCCPVersion['vCode'];
+    return $aminterface->getSCCPVersion()['vCode'];
+}
+
+function ensureMissingDeviceColumns()
+{
+    global $db;
+    $columns = array(
+        'ehookenable' => "enum('on','off') NOT NULL DEFAULT 'off'",
+    );
+    foreach ($columns as $column => $definition) {
+        $stmt = $db->prepare("SHOW COLUMNS FROM sccpdevice LIKE ?");
+        $stmt->execute([$column]);
+        if ($stmt->rowCount() === 0) {
+            $db->query("ALTER TABLE sccpdevice ADD COLUMN {$column} {$definition}");
+        }
+    }
 }
 
 function InstallDB_updateSchema($db_config)
@@ -403,36 +429,36 @@ function InstallDB_updateSchema($db_config)
     foreach ($priorSchemaFields as $table => $fieldsArr) {
         // First get any data in columns to be deleted ( _Column)
         $sqlMatch = array_reduce($fieldsArr, function($carry, $column) {
-                return "${carry}  ${column} IS NOT NULL OR";
+            return $carry . "  {$column} IS NOT NULL OR";
         });
         unset($column);
         $sqlFields = array_reduce($fieldsArr, function($carry, $column) {
-                return "${carry}  ${column} AS " . ltrim($column,"_") .",";
+            return $carry . "  {$column} AS " . ltrim($column,"_") .",";
         });
 
         $sqlMatch = rtrim($sqlMatch, "OR");
         $sqlFields = rtrim($sqlFields, ",");
-        $stmt = $db->prepare("SELECT name, ${sqlFields} FROM ${table} WHERE ${sqlMatch}");
+        $stmt = $db->prepare("SELECT name, {$sqlFields} FROM {$table} WHERE {$sqlMatch}");
         $stmt->execute();
         $dbResult = $stmt->fetchAll(\PDO::FETCH_ASSOC|\PDO::FETCH_UNIQUE);
         // Now move any data found from _Column to Column. This is safe as the two should not exist.
         if (!empty($dbResult)) {
             foreach ($dbResult as $name => $columnArr) {
                 $sqlVar = array_reduce(array_keys($columnArr), function($carry, $key) use ($columnArr){
-                        $carry .= (isset($columnArr[$key])) ? "${key} = '${columnArr[$key]}'," : "";
+                    $carry .= (isset($columnArr[$key])) ? "{$key} = '{$columnArr[$key]}'," : "";
                         return $carry;
                 });
                 $sqlVar = rtrim($sqlVar, ",");
-                $stmt = $db->prepare("UPDATE ${table} SET ${sqlVar} WHERE name = '${name}'");
+                $stmt = $db->prepare("UPDATE {$table} SET {$sqlVar} WHERE name = '{$name}'");
                 $stmt->execute();
             }
         }
         // Processed all _Column names; now safe to delete them
         $sqlDrop = array_reduce($fieldsArr, function($carry, $column) {
-                return "${carry} DROP COLUMN ${column},";
+                return $carry . " DROP COLUMN {$column},";
         });
         $sqlDrop = rtrim($sqlDrop, ", ");
-        $stmt = $db->prepare("ALTER TABLE ${table} ${sqlDrop}");
+            $stmt = $db->prepare("ALTER TABLE {$table} {$sqlDrop}");
         $stmt->execute();
     }
 
@@ -466,7 +492,7 @@ function InstallDB_updateSchema($db_config)
 
                 if (!empty($tab_modif[$fld_id]['modify'])) {
                     // Check if modify type is same as current type
-                    if (strtoupper($tab_modif[$fld_id]['modify']) == strtoupper($tabl_data['Type'])) {
+                    if (strtoupper((string) $tab_modif[$fld_id]['modify']) == strtoupper((string) ($tabl_data['Type'] ?? ''))) {
                         // Type has not changed so unset
                         unset($tab_modif[$fld_id]['modify']);
                     } else {
@@ -488,7 +514,7 @@ function InstallDB_updateSchema($db_config)
 
                 if (!empty($tab_modif[$fld_id]['def_modify'])) {
                     // Check if def_modify value is same as current value
-                    if (strtoupper($tab_modif[$fld_id]['def_modify']) == strtoupper($tabl_data['Default'])) {
+                    if (strtoupper((string) $tab_modif[$fld_id]['def_modify']) == strtoupper((string) ($tabl_data['Default'] ?? ''))) {
                         // Defaults have not changed so unset
                         unset($tab_modif[$fld_id]['def_modify']);
                     } else {
@@ -701,7 +727,12 @@ function InstallDB_updateSchema($db_config)
 
     $test = $db->prepare("SELECT count(*) AS modelCount from sccpdevmodel");
     $test->execute();
-    if ($test->fetchAll()[0]['modelCount'] == count($devModelArr)) {
+    $modelCountRes = $test->fetchAll();
+    $modelCount = 0;
+    if (!empty($modelCountRes[0]['modelCount'])) {
+        $modelCount = (int) $modelCountRes[0]['modelCount'];
+    }
+    if ($modelCount == count($devModelArr)) {
         // Appear to have a correctly populated sccpdevmodel table. Do not overwrite
         // as may contain user modifications;
         outn("<li>" . _("sccpdevmodel appears to be populated; not overwriting") . "</li>");
@@ -854,7 +885,7 @@ function installDbPopulateSccpline() {
     $stmt = $db->prepare($sql);
     $stmt->execute();
     $sccpExts = $stmt->fetchAll(\PDO::FETCH_ASSOC|\PDO::FETCH_UNIQUE);
-    $linesToCreate = array_diff_assoc($freePbxExts, $sccpExts);
+    $linesToCreate = array_diff_key($freePbxExts, $sccpExts);
 
     foreach ($linesToCreate as $key => $valArr) {
         $stmt = $db->prepare("INSERT into sccpline (name, accountcode, description, label) VALUES (:name, :accountcode, :description, :label)");
@@ -880,15 +911,30 @@ function createBackUpConfig()
     $dir = $cnf_int->get('ASTETCDIR');
 
     $fsql = $dir.'/sccp_backup_'.date("Ymd").'.sql';
-    $result = exec('mysqldump '.$amp_conf['AMPDBNAME'].' --password='.$amp_conf['AMPDBPASS'].' --user='.$amp_conf['AMPDBUSER'].' --single-transaction >'.$fsql);
+    $dumpCmd = trim((string) shell_exec('command -v mysqldump 2>/dev/null'));
+    if (!empty($dumpCmd)) {
+        $dumpCommand = sprintf(
+            "%s %s --password=%s --user=%s --single-transaction > %s 2>/dev/null",
+            escapeshellcmd($dumpCmd),
+            escapeshellarg($amp_conf['AMPDBNAME']),
+            escapeshellarg($amp_conf['AMPDBPASS']),
+            escapeshellarg($amp_conf['AMPDBUSER']),
+            escapeshellarg($fsql)
+        );
+        exec($dumpCommand, $dumpOutput, $dumpResultCode);
+        if (($dumpResultCode !== 0) || (!file_exists($fsql))) {
+            outn("<li>" . _("Warning: Could not create mysql dump backup. Continuing with file-only backup.") . "</li>");
+        }
+    } else {
+        outn("<li>" . _("Warning: mysqldump command not found. Continuing with file-only backup.") . "</li>");
+    }
 
-    try {
-        $zip = new \ZipArchive();
-    } catch (\Exception $e) {
+    if (!class_exists('\\ZipArchive')) {
         outn("<br>");
         outn("<font color='red'>PHPx.x-zip not installed where x.x is the installed PHP version. Install it before continuing !</font>");
         die_freepbx();
     }
+    $zip = new \ZipArchive();
     $filename = $dir . "/sccp_install_backup" . date("Ymdhis"). ".zip";
     if ($zip->open($filename, \ZIPARCHIVE::CREATE)) {
         foreach ($backup_files as $file) {
@@ -905,7 +951,9 @@ function createBackUpConfig()
     } else {
         outn("<li>" . _("Error Creating BackUp: ") . $filename ."</li>");
     }
-    unlink($fsql);
+    if (file_exists($fsql)) {
+        unlink($fsql);
+    }
     outn("<li>" . _("Config backup created: ") . $filename ."</li>");
 }
 
@@ -944,12 +992,20 @@ function Setup_RealTime()
                             'dbsock' => '/var/lib/mysql/mysql.sock',
                             'dbcharset'=>'utf8'
                           );
-    if (!empty($sys_mysql_socket)) {
-        if (file_exists($sys_mysql_socket)) {
-            $def_bd_config['dbsock'] = $sys_mysql_socket;
+    $socketCandidates = array_filter(array_unique(array(
+        $sys_mysql_socket,
+        '/var/run/mysqld/mysqld.sock',
+        '/run/mysqld/mysqld.sock',
+        '/var/lib/mysql/mysql.sock'
+    )));
+    foreach ($socketCandidates as $socketPath) {
+        if (file_exists($socketPath)) {
+            $def_bd_config['dbsock'] = $socketPath;
+            break;
         }
     }
     $def_bd_section = $amp_conf['AMPDBNAME'];
+    $def_bd_general_section = 'general';
     $def_ext_config = array('sccpdevice' => "mysql,{$def_bd_section},sccpdeviceconfig",'sccpline' => "mysql,{$def_bd_section},sccplineconfig");
 
     // Check extconfig file for correct connector values
@@ -997,15 +1053,31 @@ function Setup_RealTime()
     $res_conf = array();
     if (file_exists($dir . '/res_mysql.conf')) {
         $res_conf = $cnf_read->getConfig('res_mysql.conf');
+        $haveChanges = false;
         if (empty($res_conf[$def_bd_section])) {
             $res_conf[$def_bd_section] = $def_bd_config;
+            $haveChanges = true;
+        }
+        if (empty($res_conf[$def_bd_general_section])) {
+            $res_conf[$def_bd_general_section] = $def_bd_config;
+            $haveChanges = true;
+        }
+        if ($haveChanges) {
             $cnf_wr->writeConfig('res_mysql.conf', $res_conf);
             outn("<li>" . _("Updating res_mysql.conf file ...") . "</li>");
         }
     } elseif (file_exists($dir . '/res_config_mysql.conf')) {
         $res_conf = $cnf_read->getConfig('res_config_mysql.conf');
+        $haveChanges = false;
         if (empty($res_conf[$def_bd_section])) {
             $res_conf[$def_bd_section] = $def_bd_config;
+            $haveChanges = true;
+        }
+        if (empty($res_conf[$def_bd_general_section])) {
+            $res_conf[$def_bd_general_section] = $def_bd_config;
+            $haveChanges = true;
+        }
+        if ($haveChanges) {
             $cnf_wr->writeConfig('res_config_mysql.conf', $res_conf);
             outn("<li>" . _("Updating res_config_mysql.conf file ...") . "</li>");
         }
@@ -1013,6 +1085,7 @@ function Setup_RealTime()
         // Have not found either res_mysql.conf or res_config_mysql.config
         // So create the latter
         $res_conf[$def_bd_section] = $def_bd_config;
+        $res_conf[$def_bd_general_section] = $def_bd_config;
         $cnf_wr->writeConfig('res_config_mysql.conf', $res_conf, false);
     }
 }
@@ -1022,7 +1095,9 @@ function addDriver($sccp_compatible) {
     global $cnf_int;
     outn("<li>" . _("Adding driver ...") . "</li>");
     $file = $amp_conf['AMPWEBROOT'] . '/admin/modules/core/functions.inc/drivers/Sccp.class.php';
-    $contents = "<?php include '/var/www/html/admin/modules/sccp_manager/sccpManClasses/Sccp.class.php.v{$sccp_compatible}'; ?>";
+    $modulePath = sccp_manager_path("sccpManClasses/Sccp.class.php.v{$sccp_compatible}");
+    $modulePath = str_replace("'", "\\'", $modulePath);
+    $contents = "<?php include '{$modulePath}'; ?>";
     file_put_contents($file, $contents);
 }
 function checkTftpServer() {
@@ -1039,19 +1114,36 @@ function checkTftpServer() {
     if (file_exists("{$confDir}/sccpManagerRewrite.rules")) {
         rename("{$confDir}/sccpManagerRewrite.rules", "{$confDir}/sccpManagerRewrite.rules.bu");
     }
-    copy($amp_conf['AMPWEBROOT'] . '/admin/modules/sccp_manager/conf/mappingRulesHeader',"{$confDir}/sccpManagerRewrite.rules");
-    file_put_contents("{$confDir}/sccpManagerRewrite.rules", file_get_contents($amp_conf['AMPWEBROOT'] . '/admin/modules/sccp_manager/contrib/rewrite.rules'), FILE_APPEND);
+    copy(sccp_manager_path('conf/mappingRulesHeader'), "{$confDir}/sccpManagerRewrite.rules");
+    file_put_contents("{$confDir}/sccpManagerRewrite.rules", file_get_contents(sccp_manager_path('contrib/rewrite.rules')), FILE_APPEND);
     file_put_contents("{$confDir}/sccpManagerRewrite.rules", "\n# Do not disable this rule - this is required by sccp_manager\nri ^(.+\.tlzz)?$ settings/\\1", FILE_APPEND);
     // TODO: add option to use external server
     $remoteFileName = ".sccp_manager_installer_probe_sentinel_temp".mt_rand(0, 9999999);
     $remoteFileContent = "# This is a test file created by Sccp_Manager. It can be deleted without impact";
-    $possibleFtpDirs = array('/srv', '/srv/tftp','/var/lib/tftp', '/tftpboot');
+    $configuredTftpPath = '';
+    if (!empty($settingsFromDb['tftp_path']['data'])) {
+        $configuredTftpPath = $settingsFromDb['tftp_path']['data'];
+    }
+    $envTftpPath = getenv('SCCP_TFTP_ROOT');
+    $possibleFtpDirs = array_filter(array_unique(array(
+        $configuredTftpPath,
+        $envTftpPath,
+        '/srv',
+        '/srv/tftp',
+        '/var/lib/tftp',
+        '/var/lib/tftpboot',
+        '/tftpboot'
+    )));
+    $fallbackWritablePath = '';
 
     // write a couple of sentinels to different distro tftp locations in the filesystem
     // TODO: Depending on distro, do we have write permissions
     foreach ($possibleFtpDirs as $dirToTest) {
         if (is_dir($dirToTest) && is_writable($dirToTest)) {
-            $tempFile = "${dirToTest}/{$remoteFileName}";
+            if (empty($fallbackWritablePath)) {
+                $fallbackWritablePath = $dirToTest;
+            }
+            $tempFile = "{$dirToTest}/{$remoteFileName}";
             file_put_contents($tempFile, $remoteFileContent);
 
             // try to pull the written file through tftp.
@@ -1076,12 +1168,21 @@ function checkTftpServer() {
         }
     }
     if (empty($tftpRootPath)) {
-        die_freepbx(_("Either TFTP server is down or TFTP root is non standard. Please fix, refresh, and try again"));
+        if (!empty($fallbackWritablePath)) {
+            $tftpRootPath = $fallbackWritablePath;
+            outn("<li>" . _("Warning: Could not validate TFTP by network probe. Using writable path fallback: ") . $tftpRootPath . "</li>");
+            if (empty($settingsFromDb['tftp_path']['data']) || ($settingsFromDb['tftp_path']['data'] != $tftpRootPath)) {
+                $settingsFromDb["tftp_path"] = array('keyword' => 'tftp_path', 'seq' => 2, 'type' => 0, 'data' => $tftpRootPath, 'systemdefault' => '');
+            }
+        } else {
+            die_freepbx(_("Either TFTP server is down or TFTP root is non standard. Please fix, refresh, and try again"));
+        }
     }
 
     $settingsFromDb['asterisk_etc_path'] =  array( 'keyword' => 'asterisk_etc_path', 'seq' => 20, 'type' => 0, 'data' => $confDir, 'systemdefault' => '');
 
     // Get TFTP mapping Status
+    $thisInstaller->sccpvalues = $settingsFromDb;
     $settingsFromDb['tftp_rewrite'] = array('keyword' => 'tftp_rewrite', 'seq' => 20, 'type' => 0, 'data' => 'off', 'systemdefault' => '');
     if ($thisInstaller->checkTftpMapping()) {
         $settingsFromDb['tftp_rewrite']['data'] = 'pro';
@@ -1113,7 +1214,7 @@ function getMasterFileList(string $tftpRootPath) {
     if (!$thisInstaller->getFileListFromProvisioner($tftpRootPath)) {
         outn("<li>" . _("Unable to fetch master file list from provisioner, installing local copy ...") . "</li>");
         // Cannot get file from internet, so use copy with this dist which may be older.
-        if (!copy($amp_conf['AMPWEBROOT'] . '/admin/modules/sccp_manager/contrib/masterFilesStructure.xml',"{$tftpRootPath}/masterFilesStructure.xml")) {
+        if (!copy(sccp_manager_path('contrib/masterFilesStructure.xml'), "{$tftpRootPath}/masterFilesStructure.xml")) {
             return false;
         };
         return true;
@@ -1143,7 +1244,7 @@ function cleanUpSccpSettings() {
     }
     // Check that required settings are initialised and update db and $settingsFromDb if not
     // Clean up sccpsettings to remove legacy values.
-    $xml_vars = $amp_conf['AMPWEBROOT'] . "/admin/modules/sccp_manager/conf/sccpgeneral.xml.v{$sccp_compatible}";
+    $xml_vars = sccp_manager_path("conf/sccpgeneral.xml.v{$sccp_compatible}");
     $thisInstaller->xml_data = simplexml_load_file($xml_vars);
     $thisInstaller->initVarfromXml();
     foreach ( array_diff_key($settingsFromDb,$thisInstaller->sccpvalues) as $key => $valueArray) {

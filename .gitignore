@@ -1,1 +1,5 @@
 *~
+/dist/
+*.tgz
+/backups/
+/sccp_manager/

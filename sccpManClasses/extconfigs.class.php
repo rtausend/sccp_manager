@@ -4,6 +4,9 @@ namespace FreePBX\modules\Sccp_manager;
 
 class extconfigs
 {
+    private $paren_class = null;
+    private $sccpvalues = array();
+
     public function __construct($parent_class = null)
     {
         $this->paren_class = $parent_class;
@@ -44,13 +47,13 @@ class extconfigs
                 $haveDstNow = date('I');
                 $futureDateArray = array(2,4,6,8);
                 foreach ($futureDateArray as $numMonths) {
-                    $futureDate = (new \DateTime(null,new \DateTimeZone($index)))->modify("+{$numMonths} months");
+                    $futureDate = (new \DateTime('now',new \DateTimeZone($index)))->modify("+{$numMonths} months");
                     if ($futureDate->format('I') != $haveDstNow) {
                         $usesDaylight = true;
                         break;
                     };
                 }
-                $thisTzOffset = (new \DateTime(null, new \DateTimeZone($index)))->getOffset();
+                $thisTzOffset = (new \DateTime('now', new \DateTimeZone($index)))->getOffset();
 
                 // Now look for a match in cisco_tz_array based on offset and DST
                 // First correct offset if we have DST now as cisco offsets are
@@ -352,7 +355,7 @@ class extconfigs
         }
         // TODO: Need to add index.cnf, after setting defaults correctly
         if (!file_exists("{$baseConfig['tftp_templates_path']}/XMLDefault.cnf.xml_template")) {
-            $src_path = $amp_conf['AMPWEBROOT'] . '/admin/modules/sccp_manager/conf/';
+            $src_path = dirname(__DIR__) . '/conf/';
             $dst_path = "{$baseConfig["tftp_templates_path"]}/";
             foreach (glob("{$src_path}*.*_template") as $filename) {
                 copy($filename, $dst_path . basename($filename));
