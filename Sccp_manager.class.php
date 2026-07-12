@@ -745,6 +745,24 @@ class Sccp_manager extends \FreePBX_Helpers implements \BMO {
             $asteriskEtcPath = $this->sccpvalues['asterisk_etc_path']['data'];
         }
 
+        // Derived TFTP subpaths are normally written by install/checkTftpServer; legacy DBs may only have tftp_path.
+        if (!empty($this->sccpvalues['tftp_path']['data']) && !empty($this->extconfigs)) {
+            $tftpRoot = rtrim($this->sccpvalues['tftp_path']['data'], '/');
+            $storePath = rtrim($this->sccpvalues['tftp_store_path']['data'] ?? '', '/');
+            $needsTftpPaths = empty($this->sccpvalues['tftp_templates_path']['data'])
+                || empty($this->sccpvalues['tftp_store_path']['data'])
+                || ($storePath === $tftpRoot && is_dir("{$tftpRoot}/settings"));
+            if ($needsTftpPaths) {
+                $this->checkTftpMapping();
+                $updated = $this->extconfigs->updateTftpStructure($this->sccpvalues);
+                foreach ($updated as $key => $setting) {
+                    if (is_string($key) && str_starts_with($key, 'tftp_') && is_array($setting) && array_key_exists('data', $setting)) {
+                        $this->sccpvalues[$key] = $setting;
+                    }
+                }
+            }
+        }
+
         $this->sccppath = array(
                     'asterisk' => $asteriskEtcPath,
                     'tftp_path' => $this->sccpvalues['tftp_path']['data'] ?? '',
