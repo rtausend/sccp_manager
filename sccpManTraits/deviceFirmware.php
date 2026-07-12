@@ -4,7 +4,31 @@ namespace FreePBX\modules\Sccp_manager\sccpManTraits;
 
 trait deviceFirmware {
 
-    private static $firmwareFileExtensions = array('.loads', '.sbn', '.bin', '.zup', '.sbin', '.SBN', '.LOADS');
+    /** Modern SCCP: manifest + .sbn bundles (797x, 79xx, …). */
+    private static function firmwareManifestExtensions() {
+        return array('.loads', '.LOADS');
+    }
+
+    /**
+     * Legacy single-file images (7985 .bin, ATA186 .zup, …).
+     * Checked only after no matching .loads exists — modern models unaffected.
+     */
+    private static function firmwareLegacyImageExtensions() {
+        return array('.bin', '.zup');
+    }
+
+    /** Extensions scanned for firmware catalog entries (load image basenames). */
+    private static function firmwareCatalogExtensions() {
+        return array_merge(
+            self::firmwareManifestExtensions(),
+            self::firmwareLegacyImageExtensions()
+        );
+    }
+
+    /** Extension priority for on-disk existence checks (.loads always first). */
+    private function firmwareExistenceCheckExtensions() {
+        return self::firmwareCatalogExtensions();
+    }
 
     /**
      * Effective load image for XML generation: device override or model default.
@@ -54,6 +78,7 @@ trait deviceFirmware {
         }
 
         $catalog['files'] = $this->scanFirmwareFilesForModel($model);
+        $catalog['firmware_dir'] = $this->getPrimaryFirmwareDirectoryForModel($model);
         if (!empty($catalog['model_default']) && !in_array($catalog['model_default'], $catalog['files'], true)) {
             $catalog['files'][] = $catalog['model_default'];
         }
@@ -62,33 +87,85 @@ trait deviceFirmware {
     }
 
     /**
+     * Primary firmware directory for a model (same target as Provisioner download).
+     */
+    public function getPrimaryFirmwareDirectoryForModel($model) {
+        $baseDir = rtrim($this->sccppath['tftp_firmware_path'] ?? '', '/');
+        $model = trim((string) $model);
+        if ($baseDir === '' || $model === '') {
+            return '';
+        }
+        return "{$baseDir}/{$model}";
+    }
+
+    /**
+     * Resolve the on-disk path of a .loads manifest for a model (modern phones).
+     */
+    public function resolveFirmwareLoadsFilePath($model, $loadimage) {
+        $loadimage = $this->normalizeFirmwareValue($loadimage);
+        if ($loadimage === '') {
+            return '';
+        }
+        foreach ($this->getFirmwareSearchDirectories($model) as $searchDir) {
+            foreach (self::firmwareManifestExtensions() as $ext) {
+                $path = "{$searchDir}/{$loadimage}{$ext}";
+                if (is_file($path)) {
+                    return $path;
+                }
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Resolve any supported firmware image on disk (.loads preferred, then legacy .bin/.zup).
+     */
+    public function resolveFirmwareFilePath($model, $loadimage) {
+        $loadimage = $this->normalizeFirmwareValue($loadimage);
+        if ($loadimage === '') {
+            return '';
+        }
+        foreach ($this->getFirmwareSearchDirectories($model) as $searchDir) {
+            foreach ($this->firmwareExistenceCheckExtensions() as $ext) {
+                $path = "{$searchDir}/{$loadimage}{$ext}";
+                if (is_file($path)) {
+                    return $path;
+                }
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Check whether firmware for the given model load image exists on the TFTP server.
+     */
+    public function firmwareFileExistsForModel($model, $loadimage) {
+        return $this->resolveFirmwareFilePath($model, $loadimage) !== '';
+    }
+
+    /**
      * Scan TFTP firmware directory for a model.
      */
     private function scanFirmwareFilesForModel($model) {
-        $baseDir = rtrim($this->sccppath['tftp_firmware_path'] ?? '', '/');
-        if ($baseDir === '' || $model === '') {
+        if ($model === '') {
             return array();
         }
 
-        $loadsOnly = array('.loads', '.LOADS');
+        $catalogExtensions = self::firmwareCatalogExtensions();
         $files = array();
 
         foreach ($this->getFirmwareSearchDirectories($model) as $searchDir) {
             if (!is_dir($searchDir)) {
                 continue;
             }
-            $found = $this->findAllFiles($searchDir, $loadsOnly, 'fileBaseName');
+            $found = $this->findFirmwareBasenamesInDirectory($searchDir, $catalogExtensions);
             if (!empty($found)) {
                 $files = array_merge($files, $found);
             }
         }
 
-        $searchMode = $this->sccpvalues['tftp_rewrite']['data'] ?? 'off';
-        if (empty($files) && in_array($searchMode, array('off', ''), true)) {
-            $files = $this->filterFirmwareLoadNamesForModel(
-                $this->findAllFiles($baseDir, $loadsOnly, 'fileBaseName'),
-                $model
-            );
+        if (empty($files)) {
+            $files = $this->scanLegacyFlatFirmwareForModel($model, $catalogExtensions);
         }
 
         $files = array_values(array_unique(array_filter($files)));
@@ -97,18 +174,70 @@ trait deviceFirmware {
     }
 
     /**
+     * List firmware basenames in one directory (non-recursive).
+     */
+    private function findFirmwareBasenamesInDirectory($searchDir, array $extensions) {
+        $files = array();
+        if (!is_dir($searchDir)) {
+            return $files;
+        }
+        foreach (array_diff(scandir($searchDir), array('.', '..')) as $entry) {
+            $path = "{$searchDir}/{$entry}";
+            if (!is_file($path)) {
+                continue;
+            }
+            foreach ($extensions as $ext) {
+                if (strlen($entry) > strlen($ext) && substr($entry, -strlen($ext)) === $ext) {
+                    $files[] = substr($entry, 0, -strlen($ext));
+                    break;
+                }
+            }
+        }
+        return $files;
+    }
+
+    /**
+     * @deprecated Use findFirmwareBasenamesInDirectory()
+     */
+    private function findFirmwareLoadNamesInDirectory($searchDir, array $loadsOnly) {
+        return $this->findFirmwareBasenamesInDirectory($searchDir, $loadsOnly);
+    }
+
+    /**
+     * Legacy flat-layout fallback for firmware still stored directly under tftproot.
+     */
+    private function scanLegacyFlatFirmwareForModel($model, array $extensions) {
+        $legacyDirs = array(
+            rtrim($this->sccppath['tftp_firmware_path'] ?? '', '/'),
+            rtrim($this->sccppath['tftp_path'] ?? '', '/'),
+        );
+        $files = array();
+        foreach (array_unique(array_filter($legacyDirs)) as $legacyDir) {
+            if (!is_dir($legacyDir)) {
+                continue;
+            }
+            $found = $this->filterFirmwareLoadNamesForModel(
+                $this->findFirmwareBasenamesInDirectory($legacyDir, $extensions),
+                $model
+            );
+            if (!empty($found)) {
+                $files = array_merge($files, $found);
+            }
+        }
+        return $files;
+    }
+
+    /**
      * Candidate directories for model-specific firmware.
      */
     private function getFirmwareSearchDirectories($model) {
-        $baseDir = rtrim($this->sccppath['tftp_firmware_path'] ?? '', '/');
         $tftpRoot = rtrim($this->sccppath['tftp_path'] ?? '', '/');
         $dirs = array(
-            "{$baseDir}/{$model}",
-            "{$tftpRoot}/{$model}",
+            $this->getPrimaryFirmwareDirectoryForModel($model),
             "{$tftpRoot}/firmware/{$model}",
-            "{$baseDir}/firmware/{$model}",
+            "{$tftpRoot}/{$model}",
         );
-        return array_values(array_unique($dirs));
+        return array_values(array_unique(array_filter($dirs)));
     }
 
     /**
@@ -164,18 +293,8 @@ trait deviceFirmware {
         if (in_array($loadimage, $catalog['files'], true)) {
             return array('valid' => true, 'message' => '');
         }
-        // Accept model default even when only .loads siblings exist in flat TFTP layout.
-        if ($loadimage === ($catalog['model_default'] ?? '')) {
+        if ($this->firmwareFileExistsForModel($model, $loadimage)) {
             return array('valid' => true, 'message' => '');
-        }
-        $loadsPath = rtrim($this->sccppath['tftp_firmware_path'] ?? '', '/') . '/' . $loadimage . '.loads';
-        if (file_exists($loadsPath)) {
-            return array('valid' => true, 'message' => '');
-        }
-        foreach ($this->getFirmwareSearchDirectories($model) as $searchDir) {
-            if (file_exists("{$searchDir}/{$loadimage}.loads")) {
-                return array('valid' => true, 'message' => '');
-            }
         }
 
         return array(
