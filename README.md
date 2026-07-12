@@ -244,7 +244,7 @@ Gegenüber Upstream `14.5.0.4` u. a.:
 - AMI `strpos()` / `array_merge()` null-sicher bei leeren Device-Info-Responses
 - Installer: `array_diff_key` für Extension-Sync (PHP 8.2 „Array to string conversion“)
 - `Sccp.class.php.v433`: Namespace-Deklaration korrigiert
-- Firmware-Katalog: nur `.loads`-Dateien, gefiltert nach Telefonmodell
+- Firmware-Katalog: `.loads` plus Legacy `.bin`/`.zup` (7985, ATA); moderne Modelle weiterhin primär über `.loads`; `.sbn`-Komponenten ausgeschlossen
 - Massen-Firmware-Update nutzt `sccp reset` (nicht `restart`)
 - Phone-Grid: kein doppelter `SCCPShowDevices`-Aufruf; Firmware-Status lazy-loaded
 - Modul-Backups landen außerhalb von `admin/modules/` (kein Doppel-Eintrag in Module Admin)
@@ -259,6 +259,7 @@ Vollständige technische Übersicht: [documentation/Aenderungsuebersicht_2026-06
 | Datei | Inhalt |
 |-------|--------|
 | [documentation/Aenderungsuebersicht_2026-06-30.md](documentation/Aenderungsuebersicht_2026-06-30.md) | Gesamtübersicht aller Änderungen |
+| [documentation/Legacy-Firmware-Validierung-7985.md](documentation/Legacy-Firmware-Validierung-7985.md) | LoadImage-Validierung 7985/ATA (.bin/.zup) |
 | [documentation/Implementierungsplan_Firmware_pro_Telefon.md](documentation/Implementierungsplan_Firmware_pro_Telefon.md) | Firmware pro Telefon |
 | [documentation/Implementierungsplan_SEP_Tausch.md](documentation/Implementierungsplan_SEP_Tausch.md) | SEP-Tausch |
 | [documentation/Implementierungsplan_ehookEnable_pro_Telefon.md](documentation/Implementierungsplan_ehookEnable_pro_Telefon.md) | ehookEnable / EHS |
