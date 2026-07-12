@@ -33,6 +33,55 @@ class xmlinterface
         return $this->isMeaningfulVendorValue($value);
     }
 
+    /**
+     * Map DB/UI on|off (semantic Enabled/Disabled) to Cisco vendorConfig integers.
+     *
+     * Several Cisco fields use inverted semantics (0 = Enabled), e.g. pcPort and webAccess.
+     *
+     * @see Technical.notes/SEP0000000000.cnf.xml_annotated
+     */
+    private function convertVendorOnOffToXml(string $db_key, string $onOff): int
+    {
+        static $zeroMeansEnabled = [
+            'pcport',
+            'spantopcport',
+            'voicevlanaccess',
+            'webaccess',
+            'sshaccess',
+        ];
+        $enabled = ($onOff === 'on');
+        if (in_array($db_key, $zeroMeansEnabled, true)) {
+            return $enabled ? 0 : 1;
+        }
+        return $enabled ? 1 : 0;
+    }
+
+    private function applyVendorConfigSection(\SimpleXMLElement $xml_work, array $data_values): void
+    {
+        if (!isset($xml_work->vendorConfig)) {
+            return;
+        }
+        $vendorFieldMap = [
+            'autoselectlineenable' => 'autoselectline_enabled',
+            'autocallselect'       => 'autocall_select',
+        ];
+        $xml_node = $xml_work->vendorConfig;
+        foreach ($xml_work->vendorConfig->children() as $dkey => $ddata) {
+            $dkey_lower = strtolower((string) $dkey);
+            $db_key = $vendorFieldMap[$dkey_lower] ?? $dkey_lower;
+            if (!array_key_exists($db_key, $data_values) || !$this->shouldWriteVendorValue($db_key, $data_values[$db_key])) {
+                continue;
+            }
+            $vtmp_data = $data_values[$db_key];
+            if ($vtmp_data === 'on' || $vtmp_data === 'off') {
+                $xml_node->$dkey = $this->convertVendorOnOffToXml($db_key, $vtmp_data);
+            } else {
+                $xml_node->$dkey = $vtmp_data;
+            }
+        }
+        $this->replaceSimpleXmlNode($xml_work->vendorConfig, $xml_node);
+    }
+
     public function __construct($parent_class = null)
     {
         $this->paren_class = $parent_class;
@@ -313,31 +362,7 @@ class xmlinterface
                     $this->replaceSimpleXmlNode($xml_work->$key, $xml_node);
                     break;
                 case 'vendorconfig':
-                    $xml_node = $xml_work->$key;
-                    // XML field names that don't match DB column names by simple strtolower()
-                    $vendorFieldMap = array(
-                        'autoselectlineenable' => 'autoselectline_enabled',
-                        'autocallselect'       => 'autocall_select',
-                    );
-                    foreach ($xml_work->$key->children() as $dkey => $ddata) {
-                        $dkey_lower = strtolower($dkey);
-                        $db_key = $vendorFieldMap[$dkey_lower] ?? $dkey_lower;
-                        if (array_key_exists($db_key, $data_values) && $this->shouldWriteVendorValue($db_key, $data_values[$db_key])) {
-                            $vtmp_data = $data_values[$db_key];
-                            switch ($vtmp_data) {
-                                case 'on':
-                                    $xml_node->$dkey = 1;
-                                    break;
-                                case 'off':
-                                    $xml_node->$dkey = 0;
-                                    break;
-                                default:
-                                    $xml_node->$dkey = $vtmp_data;
-                                    break;
-                            }
-                        }
-                    }
-                    $this->replaceSimpleXmlNode($xml_work->$key, $xml_node);
+                    $this->applyVendorConfigSection($xml_work, $data_values);
                     break;
 
                 case 'versionstamp':
@@ -704,6 +729,9 @@ class xmlinterface
                         $xml_node->backgroundImageAccess = (($data_values['backgroundImageAccess'] == 'on') || ($data_values['backgroundImageAccess'] == 'true') ) ? 'true' : 'false';
                         $xml_node->callLogBlfEnabled = $data_values['callLogBlfEnabled'];
                         break;
+                    case 'vendorConfig':
+                        $this->applyVendorConfigSection($xml_work, $data_values);
+                        break;
                     case 'userlocale':
                         // Device language
                         $lang = $data_values['devlang'];
@@ -737,6 +765,9 @@ class xmlinterface
                         }
                         if (isset($lang)) {
                             $xml_node->name = $lang;
+                            if (isset($xml_node->version)) {
+                                $xml_node->version = $this->resolveNetworkLocaleVersion($lang, $dev_config);
+                            }
                             $this->replaceSimpleXmlNode($xml_work->$key, $xml_node);
                         } else {
                             $xml_work->$key = '';
@@ -859,11 +890,27 @@ class xmlinterface
         return $errors;
     }
 
+    private function resolveNetworkLocaleVersion($lang, array $dev_config) {
+        $countriesPath = rtrim($dev_config['tftp_countries_path'] ?? '', '/');
+        $lang = trim((string) $lang);
+        if ($countriesPath === '' || $lang === '') {
+            return '4.0(1)';
+        }
+        $tonesFile = "{$countriesPath}/{$lang}/g3-tones.xml";
+        if (file_exists($tonesFile)) {
+            // Cisco phones re-download locale files (incl. g3-tones.xml) when this version changes.
+            return '4.0(' . filemtime($tonesFile) . ')';
+        }
+        return '4.0(1)';
+    }
+
     private function setLoadInformationValue($xml_work, array $dev_config) {
-        if (isset($dev_config['tftp_firmware'])) {
-            $value = (isset($dev_config['loadimage'])) ? $dev_config['tftp_firmware'] . $dev_config['loadimage'] : '';
-        } else {
-            $value = (isset($dev_config['loadimage'])) ? $dev_config['loadimage'] : '';
+        // Cisco phones request the load image by filename from TFTP root; tftp-hpa remap
+        // resolves the on-disk path (e.g. firmware/7975/). Never write a directory path here.
+        $value = '';
+        if (!empty($dev_config['loadimage'])) {
+            $value = basename((string) $dev_config['loadimage']);
+            $value = preg_replace('/\.loads$/i', '', $value);
         }
 
         if (isset($xml_work->loadInformation)) {
