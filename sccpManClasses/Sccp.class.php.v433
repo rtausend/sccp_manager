@@ -285,6 +285,8 @@ class Sccp extends \FreePBX\modules\Core\Driver {
         }
 
         // Fill Audio codecs information
+        $audioCodecButtons = array();
+        $videoCodecButtons = array();
         foreach ($siteAudioCodecs as $key => $value) {
             $audioCodecButtons[] = array('value' => "devinfo_codec_{$key}", 'text' => $key);
         }

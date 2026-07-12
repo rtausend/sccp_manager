@@ -168,6 +168,10 @@ class dbinterface
                     $raw_settings = array();
                 }
                 break;
+            case 'get_sccpdevice_button_field':
+                $stmt = $this->db->prepare('SELECT button FROM sccpdeviceconfig WHERE name = :name');
+                $stmt->bindParam(':name', $data['id'], \PDO::PARAM_STR);
+                break;
                 // No default case so will give exception of $raw_settings undefined if the
                 // dataid is not in the switch.
         }
@@ -342,14 +346,13 @@ class dbinterface
                     case 'add':
                         foreach ($save_value as $button_array) {
                             $stmt = $this->db->prepare("INSERT INTO sccpbuttonconfig SET ref = :ref, reftype = :reftype, instance = :instance, buttontype = :buttontype, name = :name, options = :options");
-                            $stmt->bindParam(':ref', $button_array['ref'],\PDO::PARAM_STR);
-                            $stmt->bindParam(':reftype', $button_array['reftype'],\PDO::PARAM_STR);
-                            $stmt->bindParam(':instance', $button_array['instance'],\PDO::PARAM_INT);
-                            $stmt->bindParam(':buttontype', $button_array['buttontype'],\PDO::PARAM_STR);
-                            $stmt->bindParam(':name', $button_array['name'],\PDO::PARAM_STR);
-                            $stmt->bindParam(':options', $button_array['options'],\PDO::PARAM_STR);
+                            $stmt->bindValue(':ref', $button_array['ref'], \PDO::PARAM_STR);
+                            $stmt->bindValue(':reftype', $button_array['reftype'], \PDO::PARAM_STR);
+                            $stmt->bindValue(':instance', (int) $button_array['instance'], \PDO::PARAM_INT);
+                            $stmt->bindValue(':buttontype', $button_array['buttontype'], \PDO::PARAM_STR);
+                            $stmt->bindValue(':name', $button_array['name'], \PDO::PARAM_STR);
+                            $stmt->bindValue(':options', $button_array['options'], \PDO::PARAM_STR);
                             $result = $stmt->execute();
-
                         }
                         break;
                     case 'clear';
