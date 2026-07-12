@@ -66,29 +66,183 @@ trait deviceSwap {
         if ($this->isSipSccpDeviceRow($device)) {
             throw new \RuntimeException(sprintf(_('Device %s is a SIP device and cannot be swapped via SCCP exchange.'), $sepId));
         }
-        $buttons = $this->dbinterface->getSccpDeviceTableData('get_sccpdevice_buttons', array('id' => $sepId));
-        if (!is_array($buttons)) {
-            $buttons = array();
-        }
+        $buttonRows = $this->loadDeviceButtonRowsForSwap($sepId);
         $deviceRow = $this->prepareDeviceRowForSave($device, $sepId);
-        $buttonRows = array();
-        foreach ($buttons as $button) {
-            if (($button['reftype'] ?? 'sccpdevice') !== 'sccpdevice') {
-                continue;
-            }
-            $buttonRows[] = array(
-                'ref' => $sepId,
-                'reftype' => 'sccpdevice',
-                'instance' => (string) $button['instance'],
-                'buttontype' => (string) $button['buttontype'],
-                'name' => (string) ($button['name'] ?? ''),
-                'options' => (string) ($button['options'] ?? ''),
-            );
-        }
         return array(
             'device' => $deviceRow,
             'buttons' => $buttonRows,
         );
+    }
+
+    /**
+     * Load the complete button layout for device swap/replace.
+     * Merges sccpbuttonconfig rows, sccpdeviceconfig view, and live chan_sccp state.
+     */
+    private function loadDeviceButtonRowsForSwap($sepId) {
+        $merged = array();
+        foreach ($this->getDeviceButtonRowsFromTable($sepId) as $instance => $row) {
+            $merged[$instance] = $row;
+        }
+        foreach ($this->parseDeviceConfigButtonField($sepId) as $instance => $row) {
+            if (!isset($merged[$instance])) {
+                $merged[$instance] = $row;
+            }
+        }
+        $liveRows = $this->buildButtonRowsFromLiveDevice($sepId);
+        if (count($liveRows) > count($merged)) {
+            foreach ($liveRows as $instance => $row) {
+                if (!isset($merged[$instance])) {
+                    $merged[$instance] = $row;
+                }
+            }
+        }
+        ksort($merged, SORT_NUMERIC);
+        $buttonRows = array();
+        foreach ($merged as $instance => $row) {
+            $buttonRows[] = array(
+                'ref' => $sepId,
+                'reftype' => 'sccpdevice',
+                'instance' => (string) $instance,
+                'buttontype' => (string) ($row['buttontype'] ?? 'empty'),
+                'name' => (string) ($row['name'] ?? ''),
+                'options' => (string) ($row['options'] ?? ''),
+            );
+        }
+        return $buttonRows;
+    }
+
+    private function getDeviceButtonRowsFromTable($sepId) {
+        $buttons = $this->dbinterface->getSccpDeviceTableData('get_sccpdevice_buttons', array('id' => $sepId));
+        if (!is_array($buttons)) {
+            return array();
+        }
+        $byInstance = array();
+        foreach ($buttons as $button) {
+            if (($button['reftype'] ?? 'sccpdevice') !== 'sccpdevice') {
+                continue;
+            }
+            $byInstance[(int) $button['instance']] = $button;
+        }
+        return $byInstance;
+    }
+
+    private function parseDeviceConfigButtonField($sepId) {
+        $row = $this->dbinterface->getSccpDeviceTableData('get_sccpdevice_button_field', array('id' => $sepId));
+        $buttonString = is_array($row) ? ($row['button'] ?? '') : '';
+        if ($buttonString === '' || $buttonString === '---') {
+            return array();
+        }
+        $byInstance = array();
+        $instance = 1;
+        foreach (explode(';', (string) $buttonString) as $entry) {
+            if ($entry === '') {
+                continue;
+            }
+            $parts = explode(',', $entry, 3);
+            $byInstance[$instance] = array(
+                'buttontype' => (string) ($parts[0] ?? 'empty'),
+                'name' => (string) ($parts[1] ?? ''),
+                'options' => (string) ($parts[2] ?? ''),
+            );
+            $instance++;
+        }
+        return $byInstance;
+    }
+
+    private function buildButtonRowsFromLiveDevice($sepId) {
+        $info = $this->aminterface->sccp_getdevice_info($sepId);
+        if (empty($info['Buttons']) || !is_array($info['Buttons'])) {
+            return array();
+        }
+        $lineButtons = $info['LineButtons'] ?? array();
+        $speeddialButtons = $info['SpeeddialButtons'] ?? array();
+        $featureButtons = $info['FeatureButtons'] ?? array();
+        $serviceButtons = $info['ServiceURLButtons'] ?? array();
+        $byInstance = array();
+
+        foreach ($info['Buttons'] as $buttonId => $button) {
+            $instance = (int) $buttonId;
+            if ($instance < 1) {
+                continue;
+            }
+            $typestr = strtolower((string) ($button['typestr'] ?? ''));
+            switch ($typestr) {
+                case 'line':
+                    $line = $lineButtons[$buttonId] ?? array();
+                    $byInstance[$instance] = array(
+                        'buttontype' => 'line',
+                        'name' => (string) ($line['name'] ?? ''),
+                        'options' => !empty($button['default']) ? 'default' : '',
+                    );
+                    break;
+                case 'empty':
+                    $byInstance[$instance] = array(
+                        'buttontype' => 'empty',
+                        'name' => '',
+                        'options' => '',
+                    );
+                    break;
+                case 'speeddial':
+                    $speeddial = $speeddialButtons[$buttonId] ?? array();
+                    $name = (string) ($speeddial['name'] ?? '');
+                    $number = (string) ($speeddial['number'] ?? '');
+                    $hint = (string) ($speeddial['hint'] ?? '');
+                    $options = $number;
+                    if ($hint !== '' && strpos($options, $hint) === false) {
+                        $options = ($options !== '' ? $options . ',' : '') . $hint;
+                    }
+                    $byInstance[$instance] = array(
+                        'buttontype' => 'speeddial',
+                        'name' => $name !== '' ? $name : $number,
+                        'options' => $options,
+                    );
+                    break;
+                case 'feature':
+                    $feature = $featureButtons[$buttonId] ?? array();
+                    $fname = (string) ($feature['name'] ?? '');
+                    $foptions = (string) ($feature['options'] ?? '');
+                    $fargs = (string) ($feature['args'] ?? '');
+                    $options = strtolower($foptions);
+                    if ($fargs !== '') {
+                        $options = ($options !== '' ? $options . ',' : '') . $fargs;
+                    }
+                    $byInstance[$instance] = array(
+                        'buttontype' => 'feature',
+                        'name' => $fname,
+                        'options' => $options,
+                    );
+                    break;
+                case 'service':
+                    $service = $serviceButtons[$buttonId] ?? array();
+                    $byInstance[$instance] = array(
+                        'buttontype' => 'service',
+                        'name' => (string) ($service['name'] ?? ''),
+                        'options' => (string) ($service['url'] ?? ''),
+                    );
+                    break;
+            }
+        }
+        return $byInstance;
+    }
+
+    private function formatSwapButtonSummary(array $button) {
+        $type = (string) ($button['buttontype'] ?? '');
+        $name = trim((string) ($button['name'] ?? ''));
+        $options = trim((string) ($button['options'] ?? ''));
+        switch ($type) {
+            case 'empty':
+                return _('Empty');
+            case 'line':
+                return _('Line') . ': ' . preg_replace('/!silent.*/', '', $name);
+            case 'speeddial':
+                return _('Speed dial') . ': ' . ($name !== '' ? $name : $options);
+            case 'feature':
+                return _('Feature') . ': ' . ($name !== '' ? $name : $options);
+            case 'service':
+                return _('Service') . ': ' . ($name !== '' ? $name : $options);
+            default:
+                return ucfirst($type) . ($name !== '' ? ' — ' . $name : '');
+        }
     }
 
     private function prepareDeviceRowForSave(array $device, $targetSep) {
@@ -129,6 +283,15 @@ trait deviceSwap {
             );
         }
         $this->dbinterface->write('sccpbuttons', $buttons, 'clear', '', $targetSep);
+        $savedButtons = $this->getDeviceButtonRowsFromTable($targetSep);
+        if (count($savedButtons) < count($buttons)) {
+            throw new \RuntimeException(sprintf(
+                _('Only %d of %d buttons were saved for %s.'),
+                count($savedButtons),
+                count($buttons),
+                $targetSep
+            ));
+        }
     }
 
     public function validateSwapRequest(array $params) {
@@ -232,7 +395,15 @@ trait deviceSwap {
 
     private function buildDeviceSwapSummary($sepId, array $config) {
         $lines = array();
+        $buttonDetails = array();
         foreach ($config['buttons'] as $button) {
+            $instance = (int) ($button['instance'] ?? 0);
+            $slot = $instance > 0 ? sprintf(_('Button %d'), $instance) : _('Button');
+            $buttonDetails[] = array(
+                'instance' => $instance,
+                'slot' => $slot,
+                'summary' => $this->formatSwapButtonSummary($button),
+            );
             if ($button['buttontype'] === 'line') {
                 $lines[] = $button['name'];
             }
@@ -244,6 +415,7 @@ trait deviceSwap {
             'addon' => $config['device']['addon'] ?? '',
             'button_count' => count($config['buttons']),
             'lines' => $lines,
+            'button_details' => $buttonDetails,
         );
     }
 
@@ -381,6 +553,7 @@ trait deviceSwap {
                 $this->aminterface->sccpDeviceReset($sepId, $resetType);
             }
         }
+        $this->aminterface->core_sccp_reload();
     }
 
     public function handleSwapDeviceRequest(array $request) {
