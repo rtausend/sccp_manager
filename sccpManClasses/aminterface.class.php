@@ -192,9 +192,15 @@ class aminterface
             if ($this->eventListIsCompleted[$this->_lastActionId]) {
                 $response = $this->_incomingMsgObjectList[$this->_lastActionId];
                 // need to test that the list was successfully completed here
-                $allReceived = $response->getClosingEvent()
-                                ->listCorrectlyReceived($this->_incomingRawMessage[$this->_lastActionId],
-                                $response->getCountOfEvents());
+                $closingEvent = $response->getClosingEvent();
+                if ($closingEvent !== null) {
+                    $allReceived = $closingEvent->listCorrectlyReceived(
+                        $this->_incomingRawMessage[$this->_lastActionId],
+                        $response->getCountOfEvents()
+                    );
+                } else {
+                    $allReceived = $response->isSuccess();
+                }
                 // now tidy up removing any temp variables or objects
                 $response->removeClosingEvent();
                 unset($_incomingRawMessage[$this->_lastActionId]);
@@ -408,7 +414,9 @@ class aminterface
         if ($this->_connect_state) {
             $_action = new \FreePBX\modules\Sccp_manager\aminterface\SCCPShowDeviceAction($devicename);
             $result = $this->send($_action)->getResult();
-            $result['MAC_Address'] = $result['macaddress'];
+            if (!isset($result['MAC_Address']) || $result['MAC_Address'] === '') {
+                $result['MAC_Address'] = $result['macaddress'] ?? ($result['MAC-Address'] ?? '');
+            }
         }
         return $result;
     }

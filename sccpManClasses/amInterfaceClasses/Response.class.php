@@ -42,10 +42,12 @@ abstract class Response extends IncomingMessage
         return $this->_events;
     }
     public function getClosingEvent() {
-        return $this->_events['ClosingEvent'];
+        return $this->_events['ClosingEvent'] ?? null;
     }
     public function removeClosingEvent() {
-        unset($this->_events['ClosingEvent']);
+        if (isset($this->_events['ClosingEvent'])) {
+            unset($this->_events['ClosingEvent']);
+        }
     }
     public function getCountOfEvents() {
         return count($this->_events);
@@ -194,6 +196,9 @@ class SCCPGeneric_Response extends Response
         // Confirm that there is a list following. This overrides any setting
         // made in one of the parent constructs.
         $this->_completed = !$this->isList();
+        if ($this->_completed) {
+            $this->_events['ClosingEvent'] = new ResponseComplete_Event($rawContent);
+        }
     }
 
     public function addEvent($event)
@@ -245,14 +250,12 @@ class SCCPGeneric_Response extends Response
                     return false;
                 }
                 break;
-            //case $eventListEndEvent;
-            case $this->getKey('eventListEndEvent');
-                // Have the list end event. The correct number of entries is verified in the event constructor
-                $this->_events['ClosingEvent'] = $event;
-                $this->eventListEndEvent = null;
-                //return $this->_completed = true;
-                break;
             default:
+                $endEventName = $this->getKey('eventlistendevent');
+                if ($endEventName !== null && strcasecmp($event->getName(), $endEventName) === 0) {
+                    $this->_events['ClosingEvent'] = $event;
+                    break;
+                }
                 // add regular list event
                 $this->_events[] = $event;
         }
@@ -405,6 +408,21 @@ class SCCPShowDevice_Response extends SCCPGeneric_Response
             array('id'),
             array('id'=>'id','channelobjecttype'=>'channelobjecttype','name'=>'name','number'=>'number','hint'=>'hint')
         );
+        $result['LineButtons'] = $this->ConvertTableData(
+            'LineButtons',
+            array('id'),
+            array('id'=>'id','channelobjecttype'=>'channelobjecttype','name'=>'name','subid'=>'subid','label'=>'label','callforward'=>'callforward')
+        );
+        $result['FeatureButtons'] = $this->ConvertTableData(
+            'FeatureButtons',
+            array('id'),
+            array('id'=>'id','channelobjecttype'=>'channelobjecttype','name'=>'name','status'=>'status','options'=>'options','args'=>'args')
+        );
+        $result['ServiceURLButtons'] = $this->ConvertTableData(
+            'ServiceURLButtons',
+            array('id'),
+            array('id'=>'id','channelobjecttype'=>'channelobjecttype','name'=>'name','url'=>'url')
+        );
         $result['CallStatistics'] = $this->ConvertTableData(
             'CallStatistics',
             array('type'),
@@ -442,7 +460,7 @@ class SCCPShowDevice_Response extends SCCPGeneric_Response
         $result['SCCP_Vendor'] = array('vendor' => $vendor, 'model' => $model,
                                        'model_id' => $model_id, 'vendor_addon' => $vendor_addon,
                                        'model_addon' => $model_addon);
-        $result['MAC_Address'] =$result['macaddress'];
+        $result['MAC_Address'] = $result['macaddress'] ?? ($result['MAC-Address'] ?? '');
         return $result;
     }
 }
