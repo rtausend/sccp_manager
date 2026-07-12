@@ -34,15 +34,24 @@ class xmlinterface
     }
 
     /**
-     * Map DB/UI on|off (semantic Enabled/Disabled) to Cisco vendorConfig integers.
+     * Map UI on|off (semantic Enabled/Disabled) to Cisco vendorConfig integers.
      *
-     * Several Cisco fields use inverted semantics (0 = Enabled), e.g. pcPort and webAccess.
+     * Cisco uses two conventions for boolean-like vendorConfig fields:
+     *  - zeroEnabled: XML 0 = Enabled,  1 = Disabled  (pcPort, webAccess, …)
+     *  - oneEnabled:  XML 0 = Disabled, 1 = Enabled   (settingsAccess, ehookEnable, …)
+     *
+     * All sccp_manager GUI toggles (vendorconfig_* / on|off) and their mapping:
+     *   zeroEnabled : pcPort, spanToPCPort, voiceVlanAccess, webAccess [, sshAccess]
+     *   oneEnabled  : settingsAccess, videoCapability, webAdmin, ehookEnable,
+     *                 enableCdpSwPort, enableCdpPcPort, enableLldpSwPort, enableLldpPcPort,
+     *                 autoSelectLineEnable, autoCallSelect
      *
      * @see Technical.notes/SEP0000000000.cnf.xml_annotated
+     * @see https://github.com/chan-sccp/chan-sccp/wiki/Cisco-phone-configuration-files-SEPXXXXXXXXX.cnf.xml
      */
-    private function convertVendorOnOffToXml(string $db_key, string $onOff): int
+    private function convertVendorOnOffToXml(string $xmlField, string $onOff): int
     {
-        static $zeroMeansEnabled = [
+        static $zeroEnabledXmlFields = [
             'pcport',
             'spantopcport',
             'voicevlanaccess',
@@ -50,7 +59,7 @@ class xmlinterface
             'sshaccess',
         ];
         $enabled = ($onOff === 'on');
-        if (in_array($db_key, $zeroMeansEnabled, true)) {
+        if (in_array(strtolower($xmlField), $zeroEnabledXmlFields, true)) {
             return $enabled ? 0 : 1;
         }
         return $enabled ? 1 : 0;
@@ -74,7 +83,7 @@ class xmlinterface
             }
             $vtmp_data = $data_values[$db_key];
             if ($vtmp_data === 'on' || $vtmp_data === 'off') {
-                $xml_node->$dkey = $this->convertVendorOnOffToXml($db_key, $vtmp_data);
+                $xml_node->$dkey = $this->convertVendorOnOffToXml((string) $dkey, $vtmp_data);
             } else {
                 $xml_node->$dkey = $vtmp_data;
             }
