@@ -21,6 +21,9 @@
                     <button type="button" id="btn-assign-firmware" class="btn btn-default btn-tab-select" data-toggle="modal" data-target="#modal-assign-firmware" disabled>
                         <i class="fa fa-download">&nbsp;</i><span><?php echo _('Assign Firmware') ?></span>
                     </button>
+                    <button type="button" id="btn-copy-buttons" class="btn btn-default btn-tab-select" data-toggle="modal" data-target="#modal-copy-buttons" disabled>
+                        <i class="fa fa-clone">&nbsp;</i><span><?php echo _('Copy Buttons') ?></span>
+                    </button>
                     <button id="remove-sccp-phone" class="btn btn-danger sccp_update btn-tab-select" data-id="delete_hardware" disabled>
                         <i class="glyphicon glyphicon-remove"></i> <span><?php echo _('Delete') ?></span>
                     </button>
@@ -286,7 +289,7 @@
                     </div>
                     <div class="tab-pane" id="fw-step-firmware">
                         <div id="fw-model-selectors"></div>
-                        <p class="help-block"><?php echo _('Choose Model default to clear per-device overrides and use the model firmware.'); ?></p>
+                        <p class="help-block"><?php echo _('Choose Model default to clear per-device overrides and use the model firmware. Firmware files are stored under /tftpboot/firmware/{model}/ on the server; phones request them by filename only — TFTP remap resolves the disk path.'); ?></p>
                     </div>
                     <div class="tab-pane" id="fw-step-preview">
                         <div class="table-responsive">
@@ -319,6 +322,83 @@
                 <button type="button" class="btn btn-default" data-dismiss="modal"><?php echo _('Cancel'); ?></button>
                 <button type="button" class="btn btn-primary" id="fw-next-step"><?php echo _('Next'); ?></button>
                 <button type="button" class="btn btn-danger" id="fw-execute" style="display:none;"><?php echo _('Assign and reset'); ?></button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modal-copy-buttons" tabindex="-1" role="dialog" aria-labelledby="copyButtonsLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="copyButtonsLabel"><?php echo _('Copy Button Configuration'); ?></h4>
+                <button type="button" class="close" data-dismiss="modal" aria-label="<?php echo _('Close'); ?>">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-pills nav-justified" id="button-copy-steps">
+                    <li class="active"><a href="#bc-step-setup" data-toggle="tab"><?php echo _('Devices'); ?></a></li>
+                    <li><a href="#bc-step-buttons" data-toggle="tab"><?php echo _('Buttons'); ?></a></li>
+                    <li><a href="#bc-step-preview" data-toggle="tab"><?php echo _('Preview'); ?></a></li>
+                </ul>
+                <div class="tab-content" style="margin-top: 15px;">
+                    <div class="tab-pane active" id="bc-step-setup">
+                        <div class="form-group">
+                            <label for="bc-source"><?php echo _('Source device (copy from)'); ?></label>
+                            <select class="form-control" id="bc-source"></select>
+                            <p class="help-block"><?php echo _('Select the phone whose button configuration should be copied.'); ?></p>
+                        </div>
+                        <div class="form-group">
+                            <label><?php echo _('Target devices (copy to)'); ?></label>
+                            <div id="bc-target-list" class="well well-sm"></div>
+                            <p class="help-block"><?php echo _('Targets are taken from the selected rows in the device table.'); ?></p>
+                        </div>
+                    </div>
+                    <div class="tab-pane" id="bc-step-buttons">
+                        <div id="bc-source-summary" class="well well-sm"></div>
+                        <p class="help-block"><?php echo _('All configured buttons are selected by default. Uncheck buttons you do not want to copy.'); ?></p>
+                        <div class="checkbox">
+                            <label>
+                                <input type="checkbox" id="bc-select-all-buttons">
+                                <?php echo _('Select all buttons'); ?>
+                            </label>
+                        </div>
+                        <div id="bc-button-list" class="list-group"></div>
+                        <div id="bc-button-empty" class="alert alert-info" style="display:none;">
+                            <?php echo _('The source device has no configured buttons.'); ?>
+                        </div>
+                    </div>
+                    <div class="tab-pane" id="bc-step-preview">
+                        <div class="table-responsive">
+                            <table class="table table-striped" id="bc-preview-table">
+                                <thead>
+                                    <tr>
+                                        <th><?php echo _('Target'); ?></th>
+                                        <th><?php echo _('Button'); ?></th>
+                                        <th><?php echo _('Current'); ?></th>
+                                        <th><?php echo _('New'); ?></th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div id="bc-preview-warnings" class="alert alert-warning" style="display:none;"></div>
+                        <div class="checkbox">
+                            <label>
+                                <input type="checkbox" id="bc-trigger-reset" checked>
+                                <?php echo _('Send SCCP reset after copy (asterisk: sccp reset)'); ?>
+                            </label>
+                        </div>
+                        <p class="help-block"><?php echo _('Only the selected buttons are overwritten on each target device. All other buttons remain unchanged.'); ?></p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" id="bc-prev-step" style="display:none;"><?php echo _('Back'); ?></button>
+                <button type="button" class="btn btn-default" data-dismiss="modal"><?php echo _('Cancel'); ?></button>
+                <button type="button" class="btn btn-primary" id="bc-next-step"><?php echo _('Next'); ?></button>
+                <button type="button" class="btn btn-danger" id="bc-execute" style="display:none;"><?php echo _('Copy and reset'); ?></button>
             </div>
         </div>
     </div>

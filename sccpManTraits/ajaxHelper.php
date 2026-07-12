@@ -45,6 +45,9 @@ trait ajaxHelper {
             case 'get_phone_firmware_status':
             case 'preview_firmware_assign':
             case 'assign_firmware':
+            case 'get_device_button_copy_catalog':
+            case 'preview_copy_device_buttons':
+            case 'copy_device_buttons':
                 return true;
                 break;
             case 'validateMac':
@@ -427,6 +430,15 @@ trait ajaxHelper {
                 break;
             case 'assign_firmware':
                 return $this->handleAssignFirmwareRequest($request);
+                break;
+            case 'get_device_button_copy_catalog':
+                return $this->handleGetDeviceButtonCopyCatalogRequest($request);
+                break;
+            case 'preview_copy_device_buttons':
+                return $this->handlePreviewCopyDeviceButtonsRequest($request);
+                break;
+            case 'copy_device_buttons':
+                return $this->handleCopyDeviceButtonsRequest($request);
                 break;
             case 'backupsettings':
                 // -------------------------------   Old device support - In the development---

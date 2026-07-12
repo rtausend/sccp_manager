@@ -377,6 +377,9 @@ $(document).ready(function () {
                 (data.catalog.files || []).forEach(function (file) {
                     $sel.append($('<option>', { value: file, text: file }));
                 });
+                if (data.catalog.firmware_dir) {
+                    $sel.attr('title', data.catalog.firmware_dir);
+                }
                 if (current && current !== 'NONE') {
                     if ($sel.find('option[value="' + current.replace(/"/g, '\\"') + '"]').length) {
                         $sel.val(current);
@@ -1503,6 +1506,16 @@ $(".sccp-edit").click(function() {
 
     function renderSwapPreview(data) {
         var html = '';
+        function appendButtonDetails(summary) {
+            if (!summary || !summary.button_details || !summary.button_details.length) {
+                return;
+            }
+            html += '<p><strong>' + _('Buttons') + ':</strong></p><ul>';
+            summary.button_details.forEach(function (button) {
+                html += '<li>' + button.slot + ' — ' + button.summary + '</li>';
+            });
+            html += '</ul>';
+        }
         if (data.summary && data.summary.source) {
             html += '<p><strong>' + _('Source') + ':</strong> ' + data.summary.source.name;
             if (data.summary.source.description) {
@@ -1512,6 +1525,7 @@ $(".sccp-edit").click(function() {
             if (data.summary.source.lines && data.summary.source.lines.length) {
                 html += '<p><strong>' + _('Lines') + ':</strong> ' + data.summary.source.lines.join(', ') + '</p>';
             }
+            appendButtonDetails(data.summary.source);
         }
         if (data.summary && data.summary.target && data.summary.target.name) {
             html += '<p><strong>' + _('Target') + ':</strong> ' + data.summary.target.name;
@@ -1525,6 +1539,7 @@ $(".sccp-edit").click(function() {
             if (data.summary.target.lines && data.summary.target.lines.length) {
                 html += '<p><strong>' + _('Lines') + ':</strong> ' + data.summary.target.lines.join(', ') + '</p>';
             }
+            appendButtonDetails(data.summary.target);
         }
         if (data.mode === 'replace') {
             html += '<p><strong>' + _('Operation') + ':</strong> ' + _('Copy configuration to target');
@@ -1681,7 +1696,9 @@ $(".sccp-edit").click(function() {
                 '<label for="' + groupId + '">' + _('Model') + ' ' + model + ' (' + groups[model].length + ')</label>' +
                 '<select class="form-control fw-model-select" id="' + groupId + '" data-model="' + model + '">' +
                 '<option value="">' + _('Loading...') + '</option>' +
-                '</select></div>'
+                '</select>' +
+                '<p class="help-block fw-model-dir" id="' + groupId + '-dir"></p>' +
+                '</div>'
             );
             $.ajax({
                 type: 'GET',
@@ -1699,6 +1716,9 @@ $(".sccp-edit").click(function() {
                         data.catalog.files.forEach(function (file) {
                             $sel.append($('<option>', { value: file, text: file }));
                         });
+                    }
+                    if (data.catalog && data.catalog.firmware_dir) {
+                        $('#' + groupId + '-dir').text(_('TFTP directory') + ': ' + data.catalog.firmware_dir);
                     }
                     $sel.val('NONE');
                 }
@@ -1842,5 +1862,298 @@ $(".sccp-edit").click(function() {
                 bs_alert(_('Firmware assignment failed'), false);
             }
         });
+    });
+})();
+
+// Button copy wizard
+(function () {
+    var bcStepIndex = 0;
+    var bcStepIds = ['#bc-step-setup', '#bc-step-buttons', '#bc-step-preview'];
+    var bcSelectedRows = [];
+    var bcSourceButtons = [];
+
+    function getSccpPhoneRowsForCopy() {
+        if (!$('#table-sccp').length) {
+            return [];
+        }
+        return $('#table-sccp').bootstrapTable('getData') || [];
+    }
+
+    function isManagedSccpRowForCopy(row) {
+        return row && row.name && row.new_hw !== 'Y' && (row.type || '').indexOf('sip') === -1;
+    }
+
+    function getManagedButtonCopyRows() {
+        return ($('#table-sccp').bootstrapTable('getSelections') || []).filter(function (row) {
+            return row && row.name && row.new_hw !== 'Y' && (row.type || '').indexOf('sip') === -1;
+        });
+    }
+
+    function populateButtonCopySourceList() {
+        var rows = getSccpPhoneRowsForCopy().filter(isManagedSccpRowForCopy);
+        var targetNames = bcSelectedRows.map(function (row) {
+            return row.name;
+        });
+        var sourceVal = $('#bc-source').val();
+
+        $('#bc-source').empty().append(
+            $('<option>', { value: '', text: _('— Select source device —') })
+        );
+        rows.forEach(function (row) {
+            if (targetNames.indexOf(row.name) !== -1) {
+                return;
+            }
+            var label = row.name + ' — ' + (row.description || row.type || '');
+            $('#bc-source').append($('<option>', { value: row.name, text: label }));
+        });
+        if (sourceVal && targetNames.indexOf(sourceVal) === -1) {
+            $('#bc-source').val(sourceVal);
+        }
+    }
+
+    function renderButtonCopyTargetList() {
+        var html = '<ul>';
+        bcSelectedRows.forEach(function (row) {
+            html += '<li><strong>' + row.name + '</strong> — ' + (row.description || '') + ' (' + (row.type || '') + ')</li>';
+        });
+        html += '</ul>';
+        $('#bc-target-list').html(html);
+    }
+
+    function showButtonCopyStep(index) {
+        bcStepIndex = index;
+        $('#button-copy-steps li').removeClass('active').eq(index).addClass('active');
+        $(bcStepIds.join(',')).removeClass('active');
+        $(bcStepIds[index]).addClass('active');
+        $('#bc-prev-step').toggle(index > 0);
+        $('#bc-next-step').toggle(index < bcStepIds.length - 1);
+        $('#bc-execute').toggle(index === bcStepIds.length - 1);
+    }
+
+    function updateButtonCopyExecuteLabel() {
+        if ($('#bc-trigger-reset').is(':checked')) {
+            $('#bc-execute').text(_('Copy and reset'));
+        } else {
+            $('#bc-execute').text(_('Copy only (XML)'));
+        }
+    }
+
+    function resetButtonCopyWizard() {
+        bcStepIndex = 0;
+        bcSourceButtons = [];
+        bcSelectedRows = getManagedButtonCopyRows();
+        $('#bc-button-list').empty();
+        $('#bc-source-summary').empty();
+        $('#bc-button-empty').hide();
+        $('#bc-select-all-buttons').prop('checked', false);
+        $('#bc-preview-table tbody').empty();
+        $('#bc-preview-warnings').hide().empty();
+        $('#bc-trigger-reset').prop('checked', true);
+        updateButtonCopyExecuteLabel();
+        renderButtonCopyTargetList();
+        populateButtonCopySourceList();
+        showButtonCopyStep(0);
+    }
+
+    function getSelectedButtonInstances() {
+        var instances = [];
+        $('#bc-button-list input.bc-button-checkbox:checked').each(function () {
+            instances.push(parseInt($(this).val(), 10));
+        });
+        return instances;
+    }
+
+    function renderButtonCopyCatalog(data) {
+        bcSourceButtons = data.buttons || [];
+        var device = data.device || {};
+        var summary = '<p><strong>' + _('Source') + ':</strong> ' + device.name;
+        if (device.description) {
+            summary += ' — ' + device.description;
+        }
+        if (device.type) {
+            summary += ' (' + device.type + ')';
+        }
+        summary += '</p>';
+        $('#bc-source-summary').html(summary);
+
+        var $list = $('#bc-button-list');
+        $list.empty();
+        if (!bcSourceButtons.length) {
+            $('#bc-button-empty').show();
+            return;
+        }
+        $('#bc-button-empty').hide();
+        bcSourceButtons.forEach(function (button) {
+            $list.append(
+                '<label class="list-group-item">' +
+                '<input type="checkbox" class="bc-button-checkbox" value="' + button.instance + '" checked> ' +
+                '<strong>' + button.slot + '</strong> — ' + button.summary +
+                '</label>'
+            );
+        });
+        $('#bc-select-all-buttons').prop('checked', true);
+    }
+
+    function isFullButtonCopySelection() {
+        var total = $('#bc-button-list input.bc-button-checkbox').length;
+        if (!total) {
+            return true;
+        }
+        return getSelectedButtonInstances().length === total;
+    }
+
+    function getButtonCopyRequestData() {
+        var triggerReset = $('#bc-trigger-reset').is(':checked') ? '1' : '0';
+        var copyAll = isFullButtonCopySelection() ? '1' : '0';
+        var data = 'source=' + encodeURIComponent($('#bc-source').val()) + '&';
+        data += 'trigger_restart=' + triggerReset + '&';
+        data += 'copy_all=' + copyAll + '&';
+        data += 'instances=' + encodeURIComponent(JSON.stringify(getSelectedButtonInstances())) + '&';
+        bcSelectedRows.forEach(function (row, index) {
+            data += 'targets[' + index + ']=' + encodeURIComponent(row.name) + '&';
+        });
+        return data;
+    }
+
+    function renderButtonCopyPreview(data) {
+        var $tbody = $('#bc-preview-table tbody');
+        $tbody.empty();
+        (data.rows || []).forEach(function (row) {
+            var rowClass = row.changed ? '' : ' class="text-muted"';
+            $tbody.append(
+                '<tr' + rowClass + '>' +
+                '<td>' + row.target + '</td>' +
+                '<td>' + row.slot + '</td>' +
+                '<td>' + row.current_summary + '</td>' +
+                '<td>' + row.new_summary + '</td>' +
+                '</tr>'
+            );
+        });
+        if (data.warnings && data.warnings.length) {
+            $('#bc-preview-warnings').show().html('<ul><li>' + data.warnings.join('</li><li>') + '</li></ul>');
+        } else {
+            $('#bc-preview-warnings').hide().empty();
+        }
+    }
+
+    function validateButtonCopySetupStep() {
+        if (!bcSelectedRows.length) {
+            fpbxToast(_('Please select at least one target device.'), '', 'warning');
+            return false;
+        }
+        if (!$('#bc-source').val()) {
+            fpbxToast(_('Please select a source device.'), '', 'warning');
+            return false;
+        }
+        return true;
+    }
+
+    function validateButtonCopyButtonsStep() {
+        if (!getSelectedButtonInstances().length) {
+            fpbxToast(_('Please select at least one button to copy.'), '', 'warning');
+            return false;
+        }
+        return true;
+    }
+
+    $('#modal-copy-buttons').on('show.bs.modal', function () {
+        resetButtonCopyWizard();
+        if (!bcSelectedRows.length) {
+            fpbxToast(_('Please select at least one SCCP device as copy target.'), '', 'warning');
+            $('#modal-copy-buttons').modal('hide');
+        }
+    });
+
+    $('#bc-select-all-buttons').on('change', function () {
+        $('#bc-button-list input.bc-button-checkbox').prop('checked', $(this).is(':checked'));
+    });
+
+    $('#bc-button-list').on('change', 'input.bc-button-checkbox', function () {
+        var total = $('#bc-button-list input.bc-button-checkbox').length;
+        var checked = getSelectedButtonInstances().length;
+        $('#bc-select-all-buttons').prop('checked', total > 0 && checked === total);
+    });
+
+    $('#bc-next-step').on('click', function () {
+        if (bcStepIndex === 0) {
+            if (!validateButtonCopySetupStep()) {
+                return;
+            }
+            $.ajax({
+                type: 'POST',
+                url: 'ajax.php?module=sccp_manager&command=get_device_button_copy_catalog',
+                data: { source: $('#bc-source').val() },
+                success: function (data) {
+                    if (data.status === true) {
+                        renderButtonCopyCatalog(data);
+                        showButtonCopyStep(1);
+                    } else {
+                        bs_alert(data.message || _('Failed to load button configuration'), data.status);
+                    }
+                }
+            });
+            return;
+        }
+        if (bcStepIndex === 1) {
+            if (!validateButtonCopyButtonsStep()) {
+                return;
+            }
+            $.ajax({
+                type: 'POST',
+                url: 'ajax.php?module=sccp_manager&command=preview_copy_device_buttons',
+                data: getButtonCopyRequestData(),
+                success: function (data) {
+                    if (data.status === true) {
+                        renderButtonCopyPreview(data);
+                        updateButtonCopyExecuteLabel();
+                        showButtonCopyStep(2);
+                    } else {
+                        var message = (data.errors || []).join(' ') || data.message || _('Preview failed');
+                        bs_alert(message, data.status);
+                    }
+                }
+            });
+        }
+    });
+
+    $('#bc-prev-step').on('click', function () {
+        if (bcStepIndex > 0) {
+            showButtonCopyStep(bcStepIndex - 1);
+        }
+    });
+
+    $('#bc-trigger-reset').on('change', updateButtonCopyExecuteLabel);
+
+    $('#bc-execute').on('click', function () {
+        $('#bc-execute').prop('disabled', true);
+        $.ajax({
+            type: 'POST',
+            url: 'ajax.php?module=sccp_manager&command=copy_device_buttons',
+            data: getButtonCopyRequestData(),
+            success: function (data) {
+                $('#bc-execute').prop('disabled', false);
+                if (data.status === true) {
+                    $('#modal-copy-buttons').modal('hide');
+                    if (data.table_reload === true) {
+                        $('#table-sccp').bootstrapTable('refresh');
+                    }
+                    fpbxToast(data.message, _('Button copy'), 'success');
+                } else {
+                    bs_alert(data.message || _('Button copy failed'), data.status);
+                }
+            },
+            error: function () {
+                $('#bc-execute').prop('disabled', false);
+                bs_alert(_('Button copy failed'), false);
+            }
+        });
+    });
+
+    $('#table-sccp').on('post-body.bs.table', function () {
+        if ($('#modal-copy-buttons').hasClass('in') || $('#modal-copy-buttons').is(':visible')) {
+            bcSelectedRows = getManagedButtonCopyRows();
+            renderButtonCopyTargetList();
+            populateButtonCopySourceList();
+        }
     });
 })();
