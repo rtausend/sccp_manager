@@ -347,6 +347,9 @@ trait helperfunctions {
 
 
     public function checkTftpMapping(){
+        if (empty($this->sccpvalues['tftp_rewrite'])) {
+            $this->ensureSccpSettingsComplete();
+        }
         exec('in.tftpd -V', $tftpInfo);
         $info['TFTP Server'] = array('Version' => 'Not Found', 'about' => 'Mapping not available');
 
@@ -354,7 +357,9 @@ trait helperfunctions {
             $tftpInfo = explode(',',$tftpInfo[0]);
             $info['TFTP Server'] = array('Version' => $tftpInfo[0], 'about' => 'Mapping not available');
             $tftpInfo[1] = trim($tftpInfo[1]);
-            $this->sccpvalues['tftp_rewrite']['data'] = 'off';
+            if (!empty($this->sccpvalues['tftp_rewrite'])) {
+                $this->sccpvalues['tftp_rewrite']['data'] = 'off';
+            }
             if ($tftpInfo[1] == 'with remap') {
                 $info['TFTP Server'] = array('Version' => $tftpInfo[0], 'about' => $tftpInfo[1]);
 
@@ -371,10 +376,14 @@ trait helperfunctions {
                     // this way we can determine if mapping is active and using sccp_manager maps
                     if ($remoteFileContent == $this->tftpReadTestFile($remoteFileName)) {
                         //found the file and contents are correct
-                        $this->sccpvalues['tftp_rewrite']['data'] = 'pro';
+                        if (!empty($this->sccpvalues['tftp_rewrite'])) {
+                            $this->sccpvalues['tftp_rewrite']['data'] = 'pro';
+                        }
                     } else {
                         // Did not find sentinel so mapping not available
-                        $this->sccpvalues['tftp_rewrite']['data'] = 'off';
+                        if (!empty($this->sccpvalues['tftp_rewrite'])) {
+                            $this->sccpvalues['tftp_rewrite']['data'] = 'off';
+                        }
                     }
                     unlink($tempFile);
                 }
@@ -535,7 +544,7 @@ trait helperfunctions {
                                 }
                             }
                         }
-                        if ($child['type'] == 'IS' || $child['type'] == 'IED') {
+                        if ($child['type'] == 'IS' || $child['type'] == 'IED' || $child['type'] == 'ISC') {
                             if (empty($child->value)) {
                                 $datav = (string) $child->default;
                             } else {

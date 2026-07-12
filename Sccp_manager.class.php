@@ -115,6 +115,7 @@ class Sccp_manager extends \FreePBX_Helpers implements \BMO {
     use \FreePBX\modules\Sccp_Manager\sccpManTraits\bmoFunctions;
     use \FreePBX\modules\Sccp_Manager\sccpManTraits\deviceSwap;
     use \FreePBX\modules\Sccp_Manager\sccpManTraits\deviceFirmware;
+    use \FreePBX\modules\Sccp_Manager\sccpManTraits\deviceButtonCopy;
 
     public function __construct($freepbx = null) {
         if ($freepbx == null) {
@@ -1056,7 +1057,10 @@ class Sccp_manager extends \FreePBX_Helpers implements \BMO {
         $file_ext = array('.loads', '.sbn', '.bin', '.zup', '.sbin', '.SBN', '.LOADS');
         $dir = $this->sccppath['tftp_firmware_path'];
 
-        $search_mode = $this->sccpvalues['tftp_rewrite']['data'];
+        if (empty($this->sccpvalues['tftp_rewrite'])) {
+            $this->ensureSccpSettingsComplete();
+        }
+        $search_mode = $this->sccpvalues['tftp_rewrite']['data'] ?? 'off';
         switch ($search_mode) {
             case 'pro':
             case 'on':
@@ -1072,23 +1076,10 @@ class Sccp_manager extends \FreePBX_Helpers implements \BMO {
         if ($validate) {
             foreach ($modelList as &$raw_settings) {
                 if (!empty($raw_settings['loadimage'])) {
-                    $raw_settings['validate'] = 'no;';
-                    switch ($search_mode) {
-                        case 'pro':
-                        case 'on':
-                        case 'internal':
-                            if (in_array($raw_settings['loadimage'], $dir_list, true)) {
-                                $raw_settings['validate'] = 'yes;';
-                            }
-                            break;
-                        case 'internal2':
-                            break;
-                        case 'off':
-                        default: // Place in root TFTP dir
-                            if (in_array("{$dir}/{$raw_settings['loadimage']}", $dir_list, true)) {
-                                $raw_settings['validate'] = 'yes;';
-                            }
-                            break;
+                    if ($this->firmwareFileExistsForModel($raw_settings['model'], $raw_settings['loadimage'])) {
+                        $raw_settings['validate'] = 'yes;';
+                    } else {
+                        $raw_settings['validate'] = 'no;';
                     }
                 } else {
                     $raw_settings['validate'] = '-;';
