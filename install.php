@@ -74,6 +74,8 @@ InstallDbCreateViews($sccp_compatible);
 installDbPopulateSccpline();
 InstallDB_updateDBVer($sccp_compatible);
 
+migrateVendorZeroEnabledDeviceSettings();
+
 Setup_RealTime();
 addDriver($sccp_compatible);
 checkTftpServer();
@@ -1389,4 +1391,74 @@ function cleanUpSccpSettings() {
     $db->query("UPDATE sccpline SET disallow = 'all' WHERE disallow like ''");
 
 }
+
+/**
+ * One-time data fix after vendorConfig 0/1 semantics correction (commit a5327d8).
+ *
+ * Cisco fields pcPort, spanToPCPort, voiceVlanAccess and webAccess use inverted XML
+ * values (0 = Enabled). Between the ehookEnable fix and the field-aware mapping,
+ * the GUI wrote on→1 / off→0 for ALL vendor toggles — so UI "Disabled" (off) often
+ * meant "Enabled" on the phone. Flip those workaround values: off → on.
+ *
+ * Normal fields (ehookEnable, CDP/LLDP, settingsAccess, …) are not changed.
+ */
+function migrateVendorZeroEnabledDeviceSettings()
+{
+    global $db;
+
+    $migrationKey = 'vendor_zero_enabled_semantics_v1';
+    $stmt = $db->prepare('SELECT data FROM sccpsettings WHERE keyword = ?');
+    $stmt->execute([$migrationKey]);
+    $existing = $stmt->fetch(\PDO::FETCH_ASSOC);
+    if (!empty($existing) && ($existing['data'] ?? '') === 'done') {
+        outn('<li>' . _('Vendor zero-enabled device settings: migration already applied.') . '</li>');
+        return;
+    }
+
+    $zeroEnabledFields = array(
+        'pcport',
+        'spantopcport',
+        'voicevlanaccess',
+        'webaccess',
+    );
+
+    outn('<li>' . _('Migrating vendor device settings (inverted Cisco semantics workaround)…') . '</li>');
+    $totalUpdated = 0;
+    $details = array();
+
+    $stmt = $db->prepare('DESCRIBE sccpdevice');
+    $stmt->execute();
+    $describe = array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'Field');
+
+    foreach ($zeroEnabledFields as $field) {
+        if (!in_array($field, $describe, true)) {
+            continue;
+        }
+        $countStmt = $db->prepare("SELECT COUNT(*) FROM sccpdevice WHERE {$field} = 'off'");
+        $countStmt->execute();
+        $toUpdate = (int) $countStmt->fetchColumn();
+        if ($toUpdate === 0) {
+            continue;
+        }
+        $updateStmt = $db->prepare("UPDATE sccpdevice SET {$field} = 'on' WHERE {$field} = 'off'");
+        $updateStmt->execute();
+        $totalUpdated += $toUpdate;
+        $details[] = "{$field}: {$toUpdate}";
+    }
+
+    $flagStmt = $db->prepare("REPLACE INTO sccpsettings (keyword, data, seq, type, systemdefault)
+        VALUES (?, 'done', 99, 0, '')");
+    $flagStmt->execute([$migrationKey]);
+
+    if ($totalUpdated > 0) {
+        outn('<li>' . sprintf(
+            _('Vendor zero-enabled migration: updated %d device field(s) (%s). Regenerate TFTP XML (save devices or reload phones).'),
+            $totalUpdated,
+            implode(', ', $details)
+        ) . '</li>');
+    } else {
+        outn('<li>' . _('Vendor zero-enabled migration: no device fields with off required updating.') . '</li>');
+    }
+}
+
 ?>
