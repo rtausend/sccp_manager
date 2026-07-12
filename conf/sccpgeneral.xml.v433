@@ -423,7 +423,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default></default>
             <button value="1">Enabled</button>
             <button value="0">Disabled</button>
-            <help>This needs to be enabled to allow the server to push background or ringtones to the phone in the SEPXXXXXXXXXX.cnf.xml of each phone:</help>
+            <help>When enabled, the server may push background images or ringtones to the phone via TFTP provisioning (phonePersonalization in SEP*.cnf.xml).</help>
         </item>
     </page_group>
 
@@ -581,7 +581,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
-            <help>Whether a user can access the phone settings.</help>
+            <help>When enabled, the user can open the Settings menu on the phone. When disabled, the Settings button has no function.</help>
         </item>
         <item type="IS" id="6" seq="98">
             <name>videocapability</name>
@@ -589,7 +589,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
-            <help></help>
+            <help>When enabled, allows PC video (Cisco Video Advantage) via the phone's PC port. Only enable if video is actually used.</help>
         </item>
         <item type="IS" id="6" seq="98">
             <name>webaccess</name>
@@ -597,7 +597,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
-            <help>Enable the phone's HTTP server.</help>
+            <help>When enabled, the phone's built-in HTTP web server is active (status pages, configuration). When disabled, web access to the phone is blocked.</help>
         </item>
         <item type="IS" id="6" seq="98">
             <name>webadmin</name>
@@ -605,15 +605,15 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
-            <help>Enable remote administration using the phone's HTTP server. 8821 model only.</help>
+            <help>When enabled, allows remote web administration on the phone. CP-8821 model only.</help>
         </item>
         <item type="IS" id="6" seq="98">
             <name>pcport</name>
-            <label>Pc Port</label>
+            <label>PC Port</label>
             <default>off</default>
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
-            <help>Disable the PC (computer) port</help>
+            <help>When enabled, the PC (computer) port on the phone is active and a PC can connect through the phone. When disabled, the PC port is switched off.</help>
         </item>
         <item type="IS" id="6" seq="98">
             <name>spantopcport</name>
@@ -621,7 +621,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
-            <help>Forward packets sent and received on the SW (network) port to the PC (computer) port.</help>
+            <help>When enabled, traffic on the SW (network) port is mirrored (SPAN) to the PC port — useful for diagnostics (e.g. Wireshark). When disabled, no mirroring.</help>
         </item>
         <item type="IS" id="6" seq="98">
             <name>voicevlanaccess</name>
@@ -629,7 +629,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
-            <help>Allow devices connected to the PC (computer) port to access the voice VLAN.</help>
+            <help>When enabled, devices connected to the PC port may access the voice VLAN. When disabled, the PC port cannot reach the voice VLAN.</help>
         </item>
         <item type="IS" id="6" seq="98">
             <name>enablecdpswport</name>
@@ -637,7 +637,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
-            <help>Enable Cisco Discovery Protocol on the SW (network) port.</help>
+            <help>When enabled, Cisco Discovery Protocol (CDP) is active on the SW (network) port.</help>
         </item>
         <item type="IS" id="6" seq="98">
             <name>enablecdppcport</name>
@@ -645,7 +645,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
-            <help>Enable Cisco Discovery Protocol on the PC (computer) port.</help>
+            <help>When enabled, Cisco Discovery Protocol (CDP) is active on the PC (computer) port.</help>
         </item>
         <item type="IS" id="6" seq="98">
             <name>enablelldpswport</name>
@@ -653,7 +653,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
-            <help>Enable Link Layer Discovery Protocol on the SW (network) port.</help>
+            <help>When enabled, Link Layer Discovery Protocol (LLDP) is active on the SW (network) port.</help>
         </item>
         <item type="IS" id="6" seq="98">
             <name>enablelldppcport</name>
@@ -661,7 +661,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
-            <help> Enable Link Layer Discovery Protocol on the PC (computer) port.</help>
+            <help>When enabled, Link Layer Discovery Protocol (LLDP) is active on the PC (computer) port.</help>
         </item>
         <item type="IS" id="6" seq="98">
             <name>ehookenable</name>
@@ -670,9 +670,10 @@ and open the template in the editor. Base Version before all crash :-)
             <button value="off">Disabled</button>
             <button value="on">Enabled</button>
             <help>
-                Aktiviert die Headset-Hookswitch-Steuerung (EHS) für externe Headsets
-                (z. B. Jabra, Plantronics). Am Telefon oft schreibgeschützt — Wert wird
-                per TFTP-Provisioning gesetzt. Nur für unterstützte Modelle (z. B. 79xx/7975).
+                Wenn aktiviert (Enabled): Headset-Hookswitch-Steuerung (EHS) für externe Headsets
+                (z. B. Jabra, Plantronics) — das Headset kann das Telefon abheben.
+                Am Telefon oft schreibgeschützt; Wert wird per TFTP-Provisioning gesetzt.
+                Nur unterstützte Modelle (z. B. 79xx/7975).
             </help>
         </item>
     </page_group>
@@ -1105,7 +1106,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="on">Enabled</button>
             <button value="off">Disabled</button>
-            <help>Enables and Disables auto line selection.</help>
+            <help>When enabled, incoming calls on any line shift focus to that call. When disabled, only the currently selected line receives focus on incoming calls.</help>
         </item>
         <item type="IS-disabled" id="8" seq="0">
             <name>meetme</name>
@@ -1130,7 +1131,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>off</default>
             <button value="on">Enabled</button>
             <button value="off">Disabled</button>
-            <help></help>
+            <help>When enabled, the phone automatically switches display focus to an incoming call.</help>
         </item>
         <item type="IS" id="11" seq="98">
             <name>backgroundImageAccess</name>
@@ -1138,7 +1139,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>true</default>
             <button value="on">Enabled</button>
             <button value="off">Disabled</button>
-            <help>I'm guessing on this one, but on some devices, the background image on the display can be modified at the device. I think this is the thing that allows that to happen.</help>
+            <help>When enabled, the user may change the background image on the phone from the device menu.</help>
         </item>
         <item type="IS" id="11" seq="98">
             <name>callLogBlfEnabled</name>
@@ -1146,7 +1147,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default>2</default>
             <button value="3">Enabled</button>
             <button value="2">Disabled</button>
-            <help>Show numbers you can redial, but also include their current device state, so you know when they are currently busy. Note that the other phonebook entries will now also monitor the remove device state and show the current device state</help>
+            <help>When enabled, the call log / phone directory shows BLF status (busy/idle) for redial entries and monitors remote device state.</help>
         </item>
         <item type="IS" id="8">
             <name>echocancel</name>
@@ -1407,7 +1408,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default></default>
             <button value="1">Enabled</button>
             <button value="0">Disabled</button>
-            <help>This needs to be enabled to allow the server to push background or ringtones to the phone in the SEPXXXXXXXXXX.cnf.xml of each phone:</help>
+            <help>When enabled, the server may push background images or ringtones to the phone via TFTP provisioning (phonePersonalization in SEP*.cnf.xml).</help>
         </item>
         <item type="SL" id="12" seq="97">
             <label>Firmware Version (Load Image)</label>
@@ -1491,7 +1492,7 @@ and open the template in the editor. Base Version before all crash :-)
             <default></default>
             <button value="1">Enabled</button>
             <button value="0">Disabled</button>
-            <help>This needs to be enabled to allow the server to push background or ringtones to the phone in the SEPXXXXXXXXXX.cnf.xml of each phone:</help>
+            <help>When enabled, the server may push background images or ringtones to the phone via TFTP provisioning (phonePersonalization in SEP*.cnf.xml).</help>
         </item>
         <item type="IE" id="6" seq="99">
             <label>Background Image</label>
