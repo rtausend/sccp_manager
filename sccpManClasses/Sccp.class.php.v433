@@ -134,10 +134,27 @@ class Sccp extends \FreePBX\modules\Core\Driver {
                 }
             }
         }
-        $allow_codec = array();
+        // Collect the codecs enabled in the form
+        $posted_codecs = array();
         foreach($settings as $key => $val) {
             if (strncmp($key,'codec_',6) === 0 ) {
-                 $allow_codec[] = str_replace('codec_','',$key);
+                 $posted_codecs[] = str_replace('codec_','',$key);
+            }
+        }
+        // FreePBX posts the codecs in its own fixed order (ulaw,alaw,g722,...).
+        // chan-sccp uses the order of this list as the codec priority, so reorder
+        // it according to the site default (SCCP Settings -> Codecs).
+        $allow_codec = array();
+        foreach (explode(';', (string) $this->line_defaults['allow']) as $site_codec) {
+            $site_codec = trim($site_codec);
+            if ($site_codec !== '' && in_array($site_codec, $posted_codecs, true) && !in_array($site_codec, $allow_codec, true)) {
+                $allow_codec[] = $site_codec;
+            }
+        }
+        // Keep any posted codec that is not part of the site default (safety net)
+        foreach ($posted_codecs as $posted_codec) {
+            if (!in_array($posted_codec, $allow_codec, true)) {
+                $allow_codec[] = $posted_codec;
             }
         }
         $settings['allow']['value'] = implode(";", $allow_codec);
